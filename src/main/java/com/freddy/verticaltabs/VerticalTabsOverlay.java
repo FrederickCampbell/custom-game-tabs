@@ -1,0 +1,409 @@
+package com.freddy.verticaltabs;
+
+import java.awt.BasicStroke;
+import java.awt.Color;
+import java.awt.Dimension;
+import java.awt.FontMetrics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.geom.Rectangle2D;
+import java.awt.geom.RoundRectangle2D;
+import java.util.Arrays;
+import java.util.List;
+import javax.inject.Inject;
+import net.runelite.api.Client;
+import net.runelite.api.GameState;
+import net.runelite.api.gameval.VarClientID;
+import net.runelite.api.widgets.Widget;
+import net.runelite.client.ui.overlay.Overlay;
+import net.runelite.client.ui.overlay.OverlayLayer;
+import net.runelite.client.ui.overlay.OverlayPosition;
+
+final class VerticalTabsOverlay extends Overlay
+{
+    private static final Color FRAME_COLOR =
+        new Color(28, 21, 15, 255);
+    private static final Color TOOLTIP_BACKGROUND =
+        new Color(28, 21, 15, 238);
+    private static final Color TOOLTIP_BORDER =
+        new Color(145, 108, 48, 245);
+
+    private final Client client;
+    private final VerticalTabsConfig config;
+    private final TabIconRenderer iconRenderer;
+    private final Rectangle2D.Double[] buttonBounds =
+        new Rectangle2D.Double[LayoutSpec.TABS.length];
+
+    private volatile int hoveredTab = -1;
+
+    @Inject
+    VerticalTabsOverlay(
+        Client client,
+        VerticalTabsConfig config,
+        TabIconRenderer iconRenderer
+    )
+    {
+        this.client = client;
+        this.config = config;
+        this.iconRenderer = iconRenderer;
+
+        setPosition(OverlayPosition.TOP_RIGHT);
+        setLayer(OverlayLayer.ABOVE_WIDGETS);
+        setPriority(PRIORITY_HIGHEST);
+        setMinimumSize(8);
+    }
+
+    @Override
+    public Dimension render(Graphics2D graphics)
+    {
+        final LayoutSpec layout = LayoutSpec.forRoot(
+            client.getTopLevelInterfaceId()
+        );
+
+        if (
+            client.getGameState() != GameState.LOGGED_IN
+                || layout == null
+                || config.moveSeparately()
+        )
+        {
+            clearBounds();
+            return null;
+        }
+
+        final List<Integer> order =
+            TabLayout.visibleOrder(config);
+
+        if (order.isEmpty())
+        {
+            clearBounds();
+            return null;
+        }
+
+        Arrays.fill(buttonBounds, null);
+        applyQualityHints(graphics);
+
+        final double buttonSize =
+            DockMetrics.buttonSizeExact(config);
+        final int gap = DockMetrics.gap(config);
+        final double padding =
+            DockMetrics.framePaddingExact(config);
+        final double radius =
+            DockMetrics.cornerRadiusExact(config);
+        final int columns = Math.max(
+            1,
+            Math.min(config.buttonsPerRow(), order.size())
+        );
+        final int rows =
+            (order.size() + columns - 1) / columns;
+        final double railWidth =
+            columns * buttonSize
+                + Math.max(0, columns - 1) * gap;
+        final double railHeight =
+            rows * buttonSize
+                + Math.max(0, rows - 1) * gap;
+        final double totalWidth =
+            railWidth + padding * 2.0;
+        final double totalHeight =
+            railHeight + padding * 2.0;
+
+        drawFrame(
+            graphics,
+            totalWidth,
+            totalHeight,
+            radius
+        );
+
+        final int selectedTab =
+            client.getVarcIntValue(VarClientID.TOPLEVEL_PANEL);
+        final boolean panelOpen =
+            layout.isSidePanelOpen(client);
+
+        for (int position = 0; position < order.size(); position++)
+        {
+            final int tabIndex = order.get(position);
+            final int row = position / columns;
+            final int column = position % columns;
+            final double x =
+                padding + column * (buttonSize + gap);
+            final double y =
+                padding + row * (buttonSize + gap);
+            final Rectangle2D.Double localBounds =
+                new Rectangle2D.Double(
+                    x,
+                    y,
+                    buttonSize,
+                    buttonSize
+                );
+
+            buttonBounds[tabIndex] = new Rectangle2D.Double(
+                getBounds().x + x,
+                getBounds().y + y,
+                buttonSize,
+                buttonSize
+            );
+
+            final boolean selected =
+                panelOpen && selectedTab == tabIndex;
+            final boolean hovered =
+                hoveredTab == tabIndex;
+            final int opacity = selected
+                ? config.selectedOpacity()
+                : hovered
+                    ? config.hoverOpacity()
+                    : config.idleOpacity();
+
+            drawButton(
+                graphics,
+                layout,
+                tabIndex,
+                localBounds,
+                selected,
+                hovered,
+                opacity,
+                radius
+            );
+        }
+
+        if (
+            config.showTooltip()
+                && hoveredTab >= 0
+                && hoveredTab < LayoutSpec.TABS.length
+        )
+        {
+            drawTooltip(
+                graphics,
+                LayoutSpec.TABS[hoveredTab],
+                localBoundsFor(hoveredTab)
+            );
+        }
+
+        return new Dimension(
+            Math.max(1, (int) Math.ceil(totalWidth)),
+            Math.max(1, (int) Math.ceil(totalHeight))
+        );
+    }
+
+    void onMouseMoved(int x, int y)
+    {
+        hoveredTab = tabAt(x, y);
+    }
+
+    void onMouseExited()
+    {
+        hoveredTab = -1;
+    }
+
+    int tabAt(int x, int y)
+    {
+        for (int index = 0; index < buttonBounds.length; index++)
+        {
+            final Rectangle2D bounds = buttonBounds[index];
+
+            if (bounds != null && bounds.contains(x, y))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    void configurationChanged()
+    {
+        hoveredTab = -1;
+        revalidate();
+    }
+
+    private void drawFrame(
+        Graphics2D graphics,
+        double width,
+        double height,
+        double radius
+    )
+    {
+        final int opacity = config.frameOpacity();
+        final float strokeWidth =
+            DockMetrics.borderWidth(config);
+        final double inset = strokeWidth / 2.0;
+
+        final RoundRectangle2D.Double frame =
+            new RoundRectangle2D.Double(
+                inset,
+                inset,
+                Math.max(0.5, width - strokeWidth),
+                Math.max(0.5, height - strokeWidth),
+                radius + 2.0,
+                radius + 2.0
+            );
+
+        graphics.setColor(
+            withOpacity(FRAME_COLOR, opacity)
+        );
+        graphics.fill(frame);
+        graphics.setColor(
+            withOpacity(config.borderColor(), opacity)
+        );
+        graphics.setStroke(new BasicStroke(strokeWidth));
+        graphics.draw(frame);
+    }
+
+    private void drawButton(
+        Graphics2D graphics,
+        LayoutSpec layout,
+        int tabIndex,
+        Rectangle2D.Double bounds,
+        boolean selected,
+        boolean hovered,
+        int opacity,
+        double radius
+    )
+    {
+        final Color fill = selected
+            ? config.selectedColor()
+            : hovered
+                ? config.hoverColor()
+                : config.buttonColor();
+        final float strokeWidth =
+            DockMetrics.borderWidth(config);
+        final double inset = strokeWidth / 2.0;
+
+        final RoundRectangle2D.Double shape =
+            new RoundRectangle2D.Double(
+                bounds.x + inset,
+                bounds.y + inset,
+                Math.max(0.5, bounds.width - strokeWidth),
+                Math.max(0.5, bounds.height - strokeWidth),
+                radius,
+                radius
+            );
+
+        graphics.setColor(withOpacity(fill, opacity));
+        graphics.fill(shape);
+        graphics.setColor(
+            withOpacity(
+                selected
+                    ? config.borderColor().brighter()
+                    : config.borderColor(),
+                opacity
+            )
+        );
+        graphics.setStroke(new BasicStroke(strokeWidth));
+        graphics.draw(shape);
+
+        final Widget iconWidget =
+            client.getWidget(layout.getIconId(tabIndex));
+
+        iconRenderer.draw(
+            graphics,
+            iconWidget,
+            LayoutSpec.TABS[tabIndex],
+            shape.getBounds2D(),
+            opacity
+        );
+    }
+
+    private Rectangle2D.Double localBoundsFor(int tabIndex)
+    {
+        final Rectangle2D.Double absolute =
+            buttonBounds[tabIndex];
+
+        if (absolute == null)
+        {
+            return null;
+        }
+
+        return new Rectangle2D.Double(
+            absolute.x - getBounds().x,
+            absolute.y - getBounds().y,
+            absolute.width,
+            absolute.height
+        );
+    }
+
+    private void drawTooltip(
+        Graphics2D graphics,
+        TabDefinition tab,
+        Rectangle2D button
+    )
+    {
+        if (button == null)
+        {
+            return;
+        }
+
+        final FontMetrics metrics = graphics.getFontMetrics();
+        final int padding = 6;
+        final int width =
+            metrics.stringWidth(tab.getName()) + padding * 2;
+        final int height =
+            metrics.getHeight() + padding;
+        final boolean dockOnLeftHalf =
+            getBounds().getCenterX()
+                < client.getCanvasWidth() / 2.0;
+        final int x = dockOnLeftHalf
+            ? (int) Math.ceil(button.getMaxX()) + 7
+            : (int) Math.floor(button.getX()) - width - 7;
+        final int y = (int) Math.round(
+            button.getY()
+                + (button.getHeight() - height) / 2.0
+        );
+
+        graphics.setColor(TOOLTIP_BACKGROUND);
+        graphics.fillRoundRect(x, y, width, height, 5, 5);
+        graphics.setColor(TOOLTIP_BORDER);
+        graphics.drawRoundRect(x, y, width, height, 5, 5);
+        graphics.setColor(new Color(238, 216, 158));
+        graphics.drawString(
+            tab.getName(),
+            x + padding,
+            y + padding / 2 + metrics.getAscent()
+        );
+    }
+
+    private static void applyQualityHints(Graphics2D graphics)
+    {
+        graphics.setRenderingHint(
+            RenderingHints.KEY_ANTIALIASING,
+            RenderingHints.VALUE_ANTIALIAS_ON
+        );
+        graphics.setRenderingHint(
+            RenderingHints.KEY_RENDERING,
+            RenderingHints.VALUE_RENDER_QUALITY
+        );
+        graphics.setRenderingHint(
+            RenderingHints.KEY_STROKE_CONTROL,
+            RenderingHints.VALUE_STROKE_PURE
+        );
+        graphics.setRenderingHint(
+            RenderingHints.KEY_ALPHA_INTERPOLATION,
+            RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY
+        );
+    }
+
+    private static Color withOpacity(Color color, int percent)
+    {
+        final int alpha = Math.round(
+            color.getAlpha()
+                * clampPercent(percent)
+                / 100.0f
+        );
+
+        return new Color(
+            color.getRed(),
+            color.getGreen(),
+            color.getBlue(),
+            Math.max(0, Math.min(255, alpha))
+        );
+    }
+
+    private static int clampPercent(int percent)
+    {
+        return Math.max(0, Math.min(100, percent));
+    }
+
+    private void clearBounds()
+    {
+        Arrays.fill(buttonBounds, null);
+        hoveredTab = -1;
+    }
+}

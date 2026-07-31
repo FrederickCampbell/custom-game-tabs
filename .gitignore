@@ -1,0 +1,27 @@
+# Gradle and Java output
+.gradle/
+build/
+out/
+*.class
+*.jar
+*.iml
+.idea/
+.classpath
+.project
+.settings/
+
+# Local development files
+.vscode/
+tools/
+*.code-workspace
+
+# Local history and reports
+_upgrade_backups/
+.source-backups/
+*-report.json
+
+# Operating-system and editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.tmp
