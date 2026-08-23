@@ -4,7 +4,6 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
-import net.runelite.api.MenuAction;
 import net.runelite.api.gameval.VarClientID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.config.ConfigManager;
@@ -12,20 +11,19 @@ import net.runelite.client.config.ConfigManager;
 /**
  * Owns the Resizable Modern side-panel open/restore behavior.
  *
- * Panel scaling is intentionally not implemented here. Tab activation keeps
- * RuneScape's native widget geometry and remains immediate and reliable.
+ * Tab activation reuses RuneScape's native top-level tab OnOp listener. The
+ * plugin does not synthesize input or directly dispatch menu actions.
  */
 @Singleton
 final class SidePanelManager
 {
-    private static final int INVENTORY_TAB = 3;
     private static final int REOPEN_COOLDOWN_CLIENT_TICKS = 3;
 
     private final Client client;
     private final ConfigManager configManager;
     private final VerticalTabsConfig config;
 
-    private int rememberedTab = INVENTORY_TAB;
+    private int rememberedTab = LayoutSpec.INVENTORY_TAB;
     private int reopenCooldown;
     private boolean panelOpenedThisSession;
 
@@ -45,7 +43,7 @@ final class SidePanelManager
     {
         rememberedTab = validRestorablePanelTab(config.lastSidePanelTab())
             ? config.lastSidePanelTab()
-            : INVENTORY_TAB;
+            : LayoutSpec.INVENTORY_TAB;
         reopenCooldown = 0;
         panelOpenedThisSession = false;
     }
@@ -96,14 +94,14 @@ final class SidePanelManager
             client.getTopLevelInterfaceId()
         );
 
-        if (layout == null || !validTab(tabIndex))
+        if (layout == null || !LayoutSpec.isValidTab(tabIndex))
         {
             return;
         }
 
         if (!validRestorablePanelTab(tabIndex))
         {
-            invokeNativeTabAction(layout, tabIndex);
+            invokeNativeTabListener(layout, tabIndex);
             return;
         }
 
@@ -123,18 +121,20 @@ final class SidePanelManager
             return;
         }
 
+        /*
+         * If the client still remembers this tab while the panel itself is
+         * collapsed, reset the selection before running the same native listener
+         * a physical click on the original tab would run.
+         */
         if (selectedTab == tabIndex && !panelOpen)
         {
-            client.setVarcIntValue(
-                VarClientID.TOPLEVEL_PANEL,
-                -1
-            );
+            client.setVarcIntValue(VarClientID.TOPLEVEL_PANEL, -1);
         }
 
         panelOpenedThisSession = true;
         rememberTab(tabIndex);
         reopenCooldown = REOPEN_COOLDOWN_CLIENT_TICKS;
-        invokeNativeTabAction(layout, tabIndex);
+        invokeNativeTabListener(layout, tabIndex);
     }
 
     private void maintainLockedPanel()
@@ -175,7 +175,7 @@ final class SidePanelManager
         }
 
         reopenCooldown = REOPEN_COOLDOWN_CLIENT_TICKS;
-        invokeNativeTabAction(layout, rememberedTab);
+        invokeNativeTabListener(layout, rememberedTab);
     }
 
     private void rememberTab(int tabIndex)
@@ -193,7 +193,7 @@ final class SidePanelManager
         );
     }
 
-    private void invokeNativeTabAction(
+    private void invokeNativeTabListener(
         LayoutSpec layout,
         int tabIndex
     )
@@ -206,33 +206,27 @@ final class SidePanelManager
             return;
         }
 
-        final String[] actions = source.getActions();
-        final String action = actions != null
-            && actions.length > 0
-            && actions[0] != null
-            && !actions[0].isBlank()
-            ? actions[0]
-            : "Select";
+        final Object[] onOpListener = source.getOnOpListener();
+        if (onOpListener == null || onOpListener.length == 0)
+        {
+            return;
+        }
 
-        client.menuAction(
-            -1,
-            source.getId(),
-            MenuAction.CC_OP,
-            1,
-            -1,
-            action,
-            ""
-        );
-    }
-
-    private static boolean validTab(int tabIndex)
-    {
-        return tabIndex >= 0
-            && tabIndex < LayoutSpec.TABS.length;
+        /*
+         * This is the original RuneScape top-level tab listener. A real user
+         * click on the custom overlay maps 1:1 to the corresponding native tab
+         * operation without direct menu dispatch or synthetic mouse/keyboard input.
+         */
+        client.createScriptEventBuilder(onOpListener)
+            .setSource(source)
+            .setOp(1)
+            .build()
+            .run();
     }
 
     private static boolean validRestorablePanelTab(int tabIndex)
     {
-        return validTab(tabIndex) && tabIndex != 10;
+        return LayoutSpec.isValidTab(tabIndex)
+            && tabIndex != LayoutSpec.LOGOUT_TAB;
     }
 }

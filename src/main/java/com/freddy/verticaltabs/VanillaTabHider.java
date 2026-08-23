@@ -91,21 +91,30 @@ final class VanillaTabHider
         );
 
         /*
-         * Hiding a widget only stops it from rendering. Native tab stones and
-         * their backgrounds can still retain click masks and click-through
-         * blockers, leaving invisible rectangles over the game. Clear only
-         * those interaction properties while hidden. The original actions and
-         * listeners remain intact so Custom Game Tabs can still invoke the
-         * native component action programmatically.
+         * Clear only interaction properties that could leave invisible click
+         * blockers. Stone OnOp listeners remain intact so a physical click on a
+         * custom tab can reuse the corresponding native top-level tab listener.
          */
-        widget.setClickMask(0);
-        widget.setNoClickThrough(false);
-        widget.setNoScrollThrough(false);
-        if (disableListeners)
+        if (widget.getClickMask() != 0)
+        {
+            widget.setClickMask(0);
+        }
+        if (widget.getNoClickThrough())
+        {
+            widget.setNoClickThrough(false);
+        }
+        if (widget.getNoScrollThrough())
+        {
+            widget.setNoScrollThrough(false);
+        }
+        if (disableListeners && widget.hasListener())
         {
             widget.setHasListener(false);
         }
-        widget.setHidden(true);
+        if (!widget.isSelfHidden())
+        {
+            widget.setHidden(true);
+        }
     }
 
     private static final class WidgetState
@@ -144,11 +153,26 @@ final class VanillaTabHider
 
         private void restore(Widget widget)
         {
-            widget.setClickMask(clickMask);
-            widget.setNoClickThrough(noClickThrough);
-            widget.setNoScrollThrough(noScrollThrough);
-            widget.setHasListener(hasListener);
-            widget.setHidden(hidden);
+            if (widget.getClickMask() != clickMask)
+            {
+                widget.setClickMask(clickMask);
+            }
+            if (widget.getNoClickThrough() != noClickThrough)
+            {
+                widget.setNoClickThrough(noClickThrough);
+            }
+            if (widget.getNoScrollThrough() != noScrollThrough)
+            {
+                widget.setNoScrollThrough(noScrollThrough);
+            }
+            if (widget.hasListener() != hasListener)
+            {
+                widget.setHasListener(hasListener);
+            }
+            if (widget.isSelfHidden() != hidden)
+            {
+                widget.setHidden(hidden);
+            }
         }
     }
 }

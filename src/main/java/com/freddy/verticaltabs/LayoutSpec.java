@@ -6,28 +6,30 @@ import net.runelite.api.widgets.Widget;
 
 final class LayoutSpec
 {
+    static final int INVENTORY_TAB = 3;
+    static final int LOGOUT_TAB = 10;
+
     static final TabDefinition[] TABS = new TabDefinition[]
     {
-        new TabDefinition(0, "Combat Options", "CB"),
-        new TabDefinition(1, "Skills", "SK"),
-        new TabDefinition(2, "Quest List", "Q"),
-        new TabDefinition(3, "Inventory", "I"),
-        new TabDefinition(4, "Worn Equipment", "EQ"),
-        new TabDefinition(5, "Prayer", "PR"),
-        new TabDefinition(6, "Magic", "MG"),
-        new TabDefinition(7, "Friends Chat", "FC"),
-        new TabDefinition(8, "Ignore List", "IG"),
-        new TabDefinition(9, "Friends List", "FR"),
-        new TabDefinition(10, "Logout", "X"),
-        new TabDefinition(11, "Options", "OP"),
-        new TabDefinition(12, "Emotes", "EM"),
-        new TabDefinition(13, "Music Player", "MU")
+        new TabDefinition("Combat Options", "CB"),
+        new TabDefinition("Skills", "SK"),
+        new TabDefinition("Quest List", "Q"),
+        new TabDefinition("Inventory", "I"),
+        new TabDefinition("Worn Equipment", "EQ"),
+        new TabDefinition("Prayer", "PR"),
+        new TabDefinition("Magic", "MG"),
+        new TabDefinition("Friends Chat", "FC"),
+        new TabDefinition("Ignore List", "IG"),
+        new TabDefinition("Friends List", "FR"),
+        new TabDefinition("Logout", "X"),
+        new TabDefinition("Options", "OP"),
+        new TabDefinition("Emotes", "EM"),
+        new TabDefinition("Music Player", "MU")
     };
 
     static final LayoutSpec MODERN = new LayoutSpec(
         InterfaceID.TOPLEVEL_PRE_EOC,
         InterfaceID.ToplevelPreEoc.SIDE_BACKGROUND,
-        InterfaceID.ToplevelPreEoc.SIDE_CONTAINER,
         new int[]
         {
             InterfaceID.ToplevelPreEoc.SIDE_STATIC_LAYER,
@@ -76,7 +78,6 @@ final class LayoutSpec
 
     private final int rootId;
     private final int sidePanelProbeId;
-    private final int sidePanelContainerId;
     private final int[] railLayerIds;
     private final int[] backgroundIds;
     private final int[] stoneIds;
@@ -85,7 +86,6 @@ final class LayoutSpec
     private LayoutSpec(
         int rootId,
         int sidePanelProbeId,
-        int sidePanelContainerId,
         int[] railLayerIds,
         int[] backgroundIds,
         int[] stoneIds,
@@ -94,16 +94,10 @@ final class LayoutSpec
     {
         this.rootId = rootId;
         this.sidePanelProbeId = sidePanelProbeId;
-        this.sidePanelContainerId = sidePanelContainerId;
         this.railLayerIds = railLayerIds;
         this.backgroundIds = backgroundIds;
         this.stoneIds = stoneIds;
         this.iconIds = iconIds;
-    }
-
-    int getRootId()
-    {
-        return rootId;
     }
 
     int[] getRailLayerIds()
@@ -126,20 +120,6 @@ final class LayoutSpec
         return iconIds[tabIndex];
     }
 
-    Widget getSidePanelRoot(Client client)
-    {
-        final Widget container = client.getWidget(sidePanelContainerId);
-        if (container != null)
-        {
-            return container;
-        }
-
-        final Widget probe = client.getWidget(sidePanelProbeId);
-        return probe == null || probe.getParent() == null
-            ? probe
-            : probe.getParent();
-    }
-
     boolean isSidePanelOpen(Client client)
     {
         final Widget panel = client.getWidget(sidePanelProbeId);
@@ -152,5 +132,10 @@ final class LayoutSpec
     static LayoutSpec forRoot(int rootId)
     {
         return rootId == MODERN.rootId ? MODERN : null;
+    }
+
+    static boolean isValidTab(int tabIndex)
+    {
+        return tabIndex >= 0 && tabIndex < TABS.length;
     }
 }

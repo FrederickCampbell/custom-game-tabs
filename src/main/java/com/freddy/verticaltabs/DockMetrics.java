@@ -77,14 +77,6 @@ final class DockMetrics
         );
     }
 
-    static int scalePixels(int normalPixels, int percent)
-    {
-        return Math.max(
-            1,
-            (int) Math.round(scaleExact(normalPixels, percent))
-        );
-    }
-
     private static int clampScale(int percent)
     {
         return Math.max(25, Math.min(200, percent));
