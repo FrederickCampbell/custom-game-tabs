@@ -9,6 +9,24 @@ final class LayoutSpec
     static final int INVENTORY_TAB = 3;
     static final int LOGOUT_TAB = 10;
 
+    private static final int[] PANEL_INTERFACE_IDS = new int[]
+    {
+        InterfaceID.COMBAT_INTERFACE,
+        InterfaceID.STATS,
+        InterfaceID.QUESTLIST,
+        InterfaceID.INVENTORY,
+        InterfaceID.WORNITEMS,
+        InterfaceID.PRAYERBOOK,
+        InterfaceID.MAGIC_SPELLBOOK,
+        InterfaceID.CHATCHANNEL_CURRENT,
+        InterfaceID.IGNORE,
+        InterfaceID.FRIENDS,
+        InterfaceID.LOGOUT,
+        InterfaceID.SETTINGS_SIDE,
+        InterfaceID.EMOTE,
+        InterfaceID.MUSIC
+    };
+
     static final TabDefinition[] TABS = new TabDefinition[]
     {
         new TabDefinition("Combat Options", "CB"),
@@ -30,6 +48,7 @@ final class LayoutSpec
     static final LayoutSpec MODERN = new LayoutSpec(
         InterfaceID.TOPLEVEL_PRE_EOC,
         InterfaceID.ToplevelPreEoc.SIDE_BACKGROUND,
+        InterfaceID.ToplevelPreEoc.SIDE_CONTAINER,
         new int[]
         {
             InterfaceID.ToplevelPreEoc.SIDE_STATIC_LAYER,
@@ -78,6 +97,7 @@ final class LayoutSpec
 
     private final int rootId;
     private final int sidePanelProbeId;
+    private final int sideContainerId;
     private final int[] railLayerIds;
     private final int[] backgroundIds;
     private final int[] stoneIds;
@@ -86,6 +106,7 @@ final class LayoutSpec
     private LayoutSpec(
         int rootId,
         int sidePanelProbeId,
+        int sideContainerId,
         int[] railLayerIds,
         int[] backgroundIds,
         int[] stoneIds,
@@ -94,10 +115,16 @@ final class LayoutSpec
     {
         this.rootId = rootId;
         this.sidePanelProbeId = sidePanelProbeId;
+        this.sideContainerId = sideContainerId;
         this.railLayerIds = railLayerIds;
         this.backgroundIds = backgroundIds;
         this.stoneIds = stoneIds;
         this.iconIds = iconIds;
+    }
+
+    int getSideContainerId()
+    {
+        return sideContainerId;
     }
 
     int[] getRailLayerIds()
@@ -132,6 +159,65 @@ final class LayoutSpec
     static LayoutSpec forRoot(int rootId)
     {
         return rootId == MODERN.rootId ? MODERN : null;
+    }
+
+    static int getPanelInterfaceId(int tabIndex)
+    {
+        return isValidTab(tabIndex)
+            ? PANEL_INTERFACE_IDS[tabIndex]
+            : -1;
+    }
+
+    static int tabForPanelInterface(int interfaceId)
+    {
+        for (int index = 0; index < PANEL_INTERFACE_IDS.length; index++)
+        {
+            if (PANEL_INTERFACE_IDS[index] == interfaceId)
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    static boolean isInventorySideInterface(int interfaceId)
+    {
+        return interfaceId == InterfaceID.BANKSIDE
+            || interfaceId == InterfaceID.GE_OFFERS_SIDE
+            || interfaceId == InterfaceID.TRADESIDE
+            || interfaceId == InterfaceID.EQUIPMENT_SIDE
+            || interfaceId == InterfaceID.SHOPSIDE
+            || interfaceId == InterfaceID.GE_PRICECHECKER_SIDE
+            || interfaceId == InterfaceID.SEED_VAULT_DEPOSIT
+            || interfaceId == InterfaceID.RAIDS_STORAGE_SIDE
+            || interfaceId == InterfaceID.PVP_ARENA_STAGINGAREA_SHARELOADOUT
+            || interfaceId == InterfaceID.POH_COSTUMES_SIDE
+            || interfaceId == InterfaceID.SHARED_BANK_SIDE
+            || interfaceId == InterfaceID.WILDERNESS_LOOTINGBAG
+            || interfaceId == InterfaceID.RUNE_POUCH;
+    }
+
+    static boolean isInventoryOverrideInterface(int interfaceId)
+    {
+        return isInventorySideInterface(interfaceId)
+            || interfaceId == InterfaceID.BANKMAIN
+            || interfaceId == InterfaceID.BANK_DEPOSITBOX
+            || interfaceId == InterfaceID.GE_OFFERS
+            || interfaceId == InterfaceID.GE_PRICECHECKER
+            || interfaceId == InterfaceID.TRADEMAIN
+            || interfaceId == InterfaceID.SHOPMAIN
+            || interfaceId == InterfaceID.SEED_VAULT
+            || interfaceId == InterfaceID.SHARED_BANK
+            || interfaceId == InterfaceID.RAIDS_STORAGE_PRIVATE
+            || interfaceId == InterfaceID.RAIDS_STORAGE_SHARED;
+    }
+
+    static boolean isBlockingInterface(int interfaceId)
+    {
+        return isInventoryOverrideInterface(interfaceId)
+            || interfaceId == InterfaceID.BANKPIN_KEYPAD
+            || interfaceId == InterfaceID.WORLDMAP;
     }
 
     static boolean isValidTab(int tabIndex)

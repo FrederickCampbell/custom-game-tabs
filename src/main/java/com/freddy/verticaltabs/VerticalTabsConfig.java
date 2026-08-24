@@ -289,7 +289,7 @@ public interface VerticalTabsConfig extends Config
     @ConfigItem(
         keyName = "keepSidePanelOpen",
         name = "Lock Panel Open",
-        description = "Prevent the active custom tab from closing and reopen the panel if the game collapses it",
+        description = "Keep the normal side panel open without overriding Bank, Logout, or other temporary interfaces",
         section = INTERFACE_SECTION,
         position = 0
     )
@@ -301,7 +301,7 @@ public interface VerticalTabsConfig extends Config
     @ConfigItem(
         keyName = "restoreLastSidePanel",
         name = "Restore Last Panel",
-        description = "When Lock Panel Open is enabled, restore the last panel after login, hopping, or layout rebuilds",
+        description = "With Lock Panel Open enabled, restore the last normal panel after login, hopping, profile changes, or layout rebuilds",
         section = INTERFACE_SECTION,
         position = 1
     )

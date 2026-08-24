@@ -10,6 +10,9 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.PostClientTick;
+import net.runelite.api.events.WidgetClosed;
+import net.runelite.api.events.WidgetLoaded;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -17,6 +20,7 @@ import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.events.ProfileChanged;
 import net.runelite.client.input.MouseAdapter;
 import net.runelite.client.input.MouseManager;
+import net.runelite.client.input.MouseWheelListener;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.overlay.OverlayManager;
@@ -66,6 +70,9 @@ public class VerticalTabsPlugin extends Plugin
     private final List<IndividualTabOverlay> looseOverlays =
         new ArrayList<>();
 
+    private boolean mouseGestureCaptured;
+    private boolean suppressNextClick;
+
     private final MouseAdapter mouseAdapter = new MouseAdapter()
     {
         @Override
@@ -78,6 +85,12 @@ public class VerticalTabsPlugin extends Plugin
         @Override
         public MouseEvent mouseDragged(MouseEvent event)
         {
+            if (mouseGestureCaptured)
+            {
+                event.consume();
+                return event;
+            }
+
             if (!event.isAltDown())
             {
                 updateHover(event.getX(), event.getY());
@@ -96,11 +109,6 @@ public class VerticalTabsPlugin extends Plugin
         @Override
         public MouseEvent mousePressed(MouseEvent event)
         {
-            if (!SwingUtilities.isLeftMouseButton(event))
-            {
-                return event;
-            }
-
             final int tabIndex = tabAt(
                 event.getX(),
                 event.getY()
@@ -125,13 +133,78 @@ public class VerticalTabsPlugin extends Plugin
 
             if (tabIndex < 0)
             {
+                suppressNextClick = false;
+                /* A visible grouped frame is UI too; do not click through it. */
+                if (inputSurfaceAt(event.getX(), event.getY()))
+                {
+                    mouseGestureCaptured = true;
+                    suppressNextClick = true;
+                    event.consume();
+                }
                 return event;
             }
 
+            /*
+             * Capture every non-Alt mouse button over a custom tab. Only left
+             * click activates; right/middle clicks are intentionally swallowed
+             * so RuneScape cannot open/interact with whatever sits behind it.
+             */
+            mouseGestureCaptured = true;
+            suppressNextClick = true;
             event.consume();
-            clientThread.invoke(() -> sidePanelManager.activateTab(tabIndex));
+
+            if (SwingUtilities.isLeftMouseButton(event))
+            {
+                clientThread.invoke(
+                    () -> sidePanelManager.activateTab(tabIndex)
+                );
+            }
+
             return event;
         }
+
+        @Override
+        public MouseEvent mouseReleased(MouseEvent event)
+        {
+            if (mouseGestureCaptured)
+            {
+                mouseGestureCaptured = false;
+                event.consume();
+            }
+
+            return event;
+        }
+
+        @Override
+        public MouseEvent mouseClicked(MouseEvent event)
+        {
+            if (suppressNextClick)
+            {
+                suppressNextClick = false;
+                event.consume();
+                return event;
+            }
+
+            if (
+                !event.isAltDown()
+                    && inputSurfaceAt(event.getX(), event.getY())
+            )
+            {
+                event.consume();
+            }
+
+            return event;
+        }
+    };
+
+    private final MouseWheelListener mouseWheelListener = event ->
+    {
+        if (inputSurfaceAt(event.getX(), event.getY()))
+        {
+            event.consume();
+        }
+
+        return event;
     };
 
     @Override
@@ -140,6 +213,7 @@ public class VerticalTabsPlugin extends Plugin
         migrateLegacyConfiguration();
         sidePanelManager.startUp();
         mouseManager.registerMouseListener(mouseAdapter);
+        mouseManager.registerMouseWheelListener(mouseWheelListener);
         rebuildOverlays();
         clientThread.invoke(vanillaTabHider::update);
     }
@@ -148,6 +222,9 @@ public class VerticalTabsPlugin extends Plugin
     protected void shutDown()
     {
         mouseManager.unregisterMouseListener(mouseAdapter);
+        mouseManager.unregisterMouseWheelListener(mouseWheelListener);
+        mouseGestureCaptured = false;
+        suppressNextClick = false;
         removeAllOverlays();
         clientThread.invoke(() ->
         {
@@ -172,6 +249,26 @@ public class VerticalTabsPlugin extends Plugin
 
         sidePanelManager.onPostClientTick();
         snapManager.onPostClientTick();
+    }
+
+    @Subscribe
+    public void onWidgetLoaded(WidgetLoaded event)
+    {
+        sidePanelManager.onWidgetLoaded(event.getGroupId());
+
+        if (event.getGroupId() == InterfaceID.TOPLEVEL_PRE_EOC)
+        {
+            sidePanelManager.onTopLevelRebuilt();
+        }
+    }
+
+    @Subscribe
+    public void onWidgetClosed(WidgetClosed event)
+    {
+        sidePanelManager.onWidgetClosed(
+            event.getGroupId(),
+            event.isUnload()
+        );
     }
 
     @Subscribe
@@ -253,6 +350,7 @@ public class VerticalTabsPlugin extends Plugin
                         client,
                         config,
                         iconRenderer,
+                        sidePanelManager,
                         snapManager,
                         tabIndex
                     );
@@ -318,6 +416,16 @@ public class VerticalTabsPlugin extends Plugin
         }
 
         return -1;
+    }
+
+    private boolean inputSurfaceAt(int x, int y)
+    {
+        if (config.moveSeparately())
+        {
+            return tabAt(x, y) >= 0;
+        }
+
+        return dockOverlay.containsInputSurface(x, y);
     }
 
     private void updateHover(int x, int y)

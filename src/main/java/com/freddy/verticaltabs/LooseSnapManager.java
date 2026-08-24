@@ -515,9 +515,11 @@ final class LooseSnapManager
             final SnapLink link = links.get(child);
 
             if (
-                !overlays.containsKey(child)
+                child < 0
+                    || child >= LayoutSpec.TABS.length
                     || link == null
-                    || !overlays.containsKey(link.parent)
+                    || link.parent < 0
+                    || link.parent >= LayoutSpec.TABS.length
                     || child == link.parent
                     || wouldCreateCycle(child, link.parent)
             )

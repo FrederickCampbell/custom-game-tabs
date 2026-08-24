@@ -9,7 +9,6 @@ import java.awt.geom.Rectangle2D;
 import java.awt.geom.RoundRectangle2D;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
-import net.runelite.api.gameval.VarClientID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
@@ -20,15 +19,18 @@ final class IndividualTabOverlay extends Overlay
     private final Client client;
     private final VerticalTabsConfig config;
     private final TabIconRenderer iconRenderer;
+    private final SidePanelManager sidePanelManager;
     private final LooseSnapManager snapManager;
     private final int tabIndex;
 
     private volatile boolean hovered;
+    private volatile boolean rendered;
 
     IndividualTabOverlay(
         Client client,
         VerticalTabsConfig config,
         TabIconRenderer iconRenderer,
+        SidePanelManager sidePanelManager,
         LooseSnapManager snapManager,
         int tabIndex
     )
@@ -36,6 +38,7 @@ final class IndividualTabOverlay extends Overlay
         this.client = client;
         this.config = config;
         this.iconRenderer = iconRenderer;
+        this.sidePanelManager = sidePanelManager;
         this.snapManager = snapManager;
         this.tabIndex = tabIndex;
 
@@ -67,6 +70,7 @@ final class IndividualTabOverlay extends Overlay
                 || !TabLayout.isShown(config, tabIndex)
         )
         {
+            rendered = false;
             return null;
         }
 
@@ -82,10 +86,7 @@ final class IndividualTabOverlay extends Overlay
             DockMetrics.borderWidth(config);
         final double inset = strokeWidth / 2.0;
         final boolean selected =
-            layout.isSidePanelOpen(client)
-                && client.getVarcIntValue(
-                    VarClientID.TOPLEVEL_PANEL
-                ) == tabIndex;
+            sidePanelManager.isTabActive(tabIndex);
         final int opacity = selected
             ? config.selectedOpacity()
             : hovered
@@ -131,6 +132,7 @@ final class IndividualTabOverlay extends Overlay
             opacity
         );
 
+        rendered = true;
         return new Dimension(cellSize, cellSize);
     }
 
@@ -141,7 +143,12 @@ final class IndividualTabOverlay extends Overlay
 
     boolean contains(int x, int y)
     {
-        return getBounds().contains(x, y);
+        return rendered
+            && client.getGameState() == GameState.LOGGED_IN
+            && LayoutSpec.forRoot(client.getTopLevelInterfaceId()) != null
+            && config.moveSeparately()
+            && TabLayout.isShown(config, tabIndex)
+            && getBounds().contains(x, y);
     }
 
     void setHovered(boolean hovered)

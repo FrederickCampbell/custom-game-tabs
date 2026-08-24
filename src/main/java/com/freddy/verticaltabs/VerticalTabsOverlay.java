@@ -13,7 +13,6 @@ import java.util.List;
 import javax.inject.Inject;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
-import net.runelite.api.gameval.VarClientID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
@@ -31,21 +30,25 @@ final class VerticalTabsOverlay extends Overlay
     private final Client client;
     private final VerticalTabsConfig config;
     private final TabIconRenderer iconRenderer;
+    private final SidePanelManager sidePanelManager;
     private final Rectangle2D.Double[] buttonBounds =
         new Rectangle2D.Double[LayoutSpec.TABS.length];
 
     private volatile int hoveredTab = -1;
+    private volatile boolean rendered;
 
     @Inject
     VerticalTabsOverlay(
         Client client,
         VerticalTabsConfig config,
-        TabIconRenderer iconRenderer
+        TabIconRenderer iconRenderer,
+        SidePanelManager sidePanelManager
     )
     {
         this.client = client;
         this.config = config;
         this.iconRenderer = iconRenderer;
+        this.sidePanelManager = sidePanelManager;
 
         setPosition(OverlayPosition.TOP_RIGHT);
         setLayer(OverlayLayer.ABOVE_WIDGETS);
@@ -113,11 +116,6 @@ final class VerticalTabsOverlay extends Overlay
             radius
         );
 
-        final int selectedTab =
-            client.getVarcIntValue(VarClientID.TOPLEVEL_PANEL);
-        final boolean panelOpen =
-            layout.isSidePanelOpen(client);
-
         for (int position = 0; position < order.size(); position++)
         {
             final int tabIndex = order.get(position);
@@ -143,7 +141,7 @@ final class VerticalTabsOverlay extends Overlay
             );
 
             final boolean selected =
-                panelOpen && selectedTab == tabIndex;
+                sidePanelManager.isTabActive(tabIndex);
             final boolean hovered =
                 hoveredTab == tabIndex;
             final int opacity = selected
@@ -177,6 +175,7 @@ final class VerticalTabsOverlay extends Overlay
             );
         }
 
+        rendered = true;
         return new Dimension(
             Math.max(1, (int) Math.ceil(totalWidth)),
             Math.max(1, (int) Math.ceil(totalHeight))
@@ -195,6 +194,16 @@ final class VerticalTabsOverlay extends Overlay
 
     int tabAt(int x, int y)
     {
+        if (
+            !rendered
+                || client.getGameState() != GameState.LOGGED_IN
+                || LayoutSpec.forRoot(client.getTopLevelInterfaceId()) == null
+                || config.moveSeparately()
+        )
+        {
+            return -1;
+        }
+
         for (int index = 0; index < buttonBounds.length; index++)
         {
             final Rectangle2D bounds = buttonBounds[index];
@@ -206,6 +215,26 @@ final class VerticalTabsOverlay extends Overlay
         }
 
         return -1;
+    }
+
+    boolean containsInputSurface(int x, int y)
+    {
+        if (
+            !rendered
+                || client.getGameState() != GameState.LOGGED_IN
+                || LayoutSpec.forRoot(client.getTopLevelInterfaceId()) == null
+                || config.moveSeparately()
+        )
+        {
+            return false;
+        }
+
+        if (config.frameOpacity() <= 0)
+        {
+            return tabAt(x, y) >= 0;
+        }
+
+        return getBounds().contains(x, y);
     }
 
     void configurationChanged()
@@ -403,6 +432,7 @@ final class VerticalTabsOverlay extends Overlay
 
     private void clearBounds()
     {
+        rendered = false;
         Arrays.fill(buttonBounds, null);
         hoveredTab = -1;
     }
