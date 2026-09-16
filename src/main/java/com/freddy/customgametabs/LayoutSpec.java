@@ -1,5 +1,6 @@
-package com.freddy.verticaltabs;
+package com.freddy.customgametabs;
 
+import java.awt.Rectangle;
 import net.runelite.api.Client;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
@@ -8,24 +9,6 @@ final class LayoutSpec
 {
     static final int INVENTORY_TAB = 3;
     static final int LOGOUT_TAB = 10;
-
-    private static final int[] PANEL_INTERFACE_IDS = new int[]
-    {
-        InterfaceID.COMBAT_INTERFACE,
-        InterfaceID.STATS,
-        InterfaceID.QUESTLIST,
-        InterfaceID.INVENTORY,
-        InterfaceID.WORNITEMS,
-        InterfaceID.PRAYERBOOK,
-        InterfaceID.MAGIC_SPELLBOOK,
-        InterfaceID.CHATCHANNEL_CURRENT,
-        InterfaceID.IGNORE,
-        InterfaceID.FRIENDS,
-        InterfaceID.LOGOUT,
-        InterfaceID.SETTINGS_SIDE,
-        InterfaceID.EMOTE,
-        InterfaceID.MUSIC
-    };
 
     static final TabDefinition[] TABS = new TabDefinition[]
     {
@@ -96,7 +79,7 @@ final class LayoutSpec
     );
 
     private final int rootId;
-    private final int sidePanelProbeId;
+    private final int sideBackgroundId;
     private final int sideContainerId;
     private final int[] railLayerIds;
     private final int[] backgroundIds;
@@ -105,7 +88,7 @@ final class LayoutSpec
 
     private LayoutSpec(
         int rootId,
-        int sidePanelProbeId,
+        int sideBackgroundId,
         int sideContainerId,
         int[] railLayerIds,
         int[] backgroundIds,
@@ -114,17 +97,12 @@ final class LayoutSpec
     )
     {
         this.rootId = rootId;
-        this.sidePanelProbeId = sidePanelProbeId;
+        this.sideBackgroundId = sideBackgroundId;
         this.sideContainerId = sideContainerId;
         this.railLayerIds = railLayerIds;
         this.backgroundIds = backgroundIds;
         this.stoneIds = stoneIds;
         this.iconIds = iconIds;
-    }
-
-    int getSideContainerId()
-    {
-        return sideContainerId;
     }
 
     int[] getRailLayerIds()
@@ -149,75 +127,65 @@ final class LayoutSpec
 
     boolean isSidePanelOpen(Client client)
     {
-        final Widget panel = client.getWidget(sidePanelProbeId);
-        return panel != null
-            && !panel.isHidden()
-            && panel.getWidth() > 0
-            && panel.getHeight() > 0;
+        return visibleBounds(client.getWidget(sideContainerId)) != null
+            || visibleBounds(client.getWidget(sideBackgroundId)) != null;
+    }
+
+    /**
+     * Capture the native side-panel rectangles on the RuneLite client thread.
+     * Callers may safely publish/read the returned immutable Rectangle copies
+     * from AWT mouse callbacks without touching Widget state there.
+     */
+    Rectangle[] captureSidePanelBounds(Client client)
+    {
+        final Rectangle container = visibleBounds(
+            client.getWidget(sideContainerId)
+        );
+        final Rectangle background = visibleBounds(
+            client.getWidget(sideBackgroundId)
+        );
+
+        if (container == null && background == null)
+        {
+            return new Rectangle[0];
+        }
+
+        if (container == null)
+        {
+            return new Rectangle[] { new Rectangle(background) };
+        }
+
+        if (background == null)
+        {
+            return new Rectangle[] { new Rectangle(container) };
+        }
+
+        return new Rectangle[]
+        {
+            new Rectangle(container),
+            new Rectangle(background)
+        };
+    }
+
+    private static Rectangle visibleBounds(Widget widget)
+    {
+        if (
+            widget == null
+                || widget.isHidden()
+                || widget.getWidth() <= 0
+                || widget.getHeight() <= 0
+        )
+        {
+            return null;
+        }
+
+        final Rectangle bounds = widget.getBounds();
+        return bounds == null || bounds.isEmpty() ? null : bounds;
     }
 
     static LayoutSpec forRoot(int rootId)
     {
         return rootId == MODERN.rootId ? MODERN : null;
-    }
-
-    static int getPanelInterfaceId(int tabIndex)
-    {
-        return isValidTab(tabIndex)
-            ? PANEL_INTERFACE_IDS[tabIndex]
-            : -1;
-    }
-
-    static int tabForPanelInterface(int interfaceId)
-    {
-        for (int index = 0; index < PANEL_INTERFACE_IDS.length; index++)
-        {
-            if (PANEL_INTERFACE_IDS[index] == interfaceId)
-            {
-                return index;
-            }
-        }
-
-        return -1;
-    }
-
-    static boolean isInventorySideInterface(int interfaceId)
-    {
-        return interfaceId == InterfaceID.BANKSIDE
-            || interfaceId == InterfaceID.GE_OFFERS_SIDE
-            || interfaceId == InterfaceID.TRADESIDE
-            || interfaceId == InterfaceID.EQUIPMENT_SIDE
-            || interfaceId == InterfaceID.SHOPSIDE
-            || interfaceId == InterfaceID.GE_PRICECHECKER_SIDE
-            || interfaceId == InterfaceID.SEED_VAULT_DEPOSIT
-            || interfaceId == InterfaceID.RAIDS_STORAGE_SIDE
-            || interfaceId == InterfaceID.PVP_ARENA_STAGINGAREA_SHARELOADOUT
-            || interfaceId == InterfaceID.POH_COSTUMES_SIDE
-            || interfaceId == InterfaceID.SHARED_BANK_SIDE
-            || interfaceId == InterfaceID.WILDERNESS_LOOTINGBAG
-            || interfaceId == InterfaceID.RUNE_POUCH;
-    }
-
-    static boolean isInventoryOverrideInterface(int interfaceId)
-    {
-        return isInventorySideInterface(interfaceId)
-            || interfaceId == InterfaceID.BANKMAIN
-            || interfaceId == InterfaceID.BANK_DEPOSITBOX
-            || interfaceId == InterfaceID.GE_OFFERS
-            || interfaceId == InterfaceID.GE_PRICECHECKER
-            || interfaceId == InterfaceID.TRADEMAIN
-            || interfaceId == InterfaceID.SHOPMAIN
-            || interfaceId == InterfaceID.SEED_VAULT
-            || interfaceId == InterfaceID.SHARED_BANK
-            || interfaceId == InterfaceID.RAIDS_STORAGE_PRIVATE
-            || interfaceId == InterfaceID.RAIDS_STORAGE_SHARED;
-    }
-
-    static boolean isBlockingInterface(int interfaceId)
-    {
-        return isInventoryOverrideInterface(interfaceId)
-            || interfaceId == InterfaceID.BANKPIN_KEYPAD
-            || interfaceId == InterfaceID.WORLDMAP;
     }
 
     static boolean isValidTab(int tabIndex)

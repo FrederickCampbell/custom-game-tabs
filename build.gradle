@@ -14,10 +14,10 @@ repositories {
 }
 
 def runeLiteVersion = 'latest.release'
-def pluginMainClass = 'com.freddy.verticaltabs.VerticalTabsPluginTest'
+def pluginMainClass = 'com.freddy.customgametabs.CustomGameTabsPluginTest'
 
-group = 'com.freddy.verticaltabs'
-version = '1.0.0'
+group = 'com.freddy.customgametabs'
+version = '2.2.2'
 
 dependencies {
     compileOnly group: 'net.runelite', name: 'client', version: runeLiteVersion

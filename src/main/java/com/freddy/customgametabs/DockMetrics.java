@@ -1,4 +1,4 @@
-package com.freddy.verticaltabs;
+package com.freddy.customgametabs;
 
 final class DockMetrics
 {
@@ -11,7 +11,7 @@ final class DockMetrics
     {
     }
 
-    static double buttonSizeExact(VerticalTabsConfig config)
+    static double buttonSizeExact(CustomGameTabsConfig config)
     {
         return scaleExact(
             NORMAL_BUTTON_SIZE,
@@ -19,7 +19,7 @@ final class DockMetrics
         );
     }
 
-    static int buttonCellSize(VerticalTabsConfig config)
+    static int buttonCellSize(CustomGameTabsConfig config)
     {
         return Math.max(
             1,
@@ -27,7 +27,7 @@ final class DockMetrics
         );
     }
 
-    static int gap(VerticalTabsConfig config)
+    static int gap(CustomGameTabsConfig config)
     {
         return gapPixels(config.gap());
     }
@@ -37,7 +37,7 @@ final class DockMetrics
         return Math.max(0, configuredPixels);
     }
 
-    static double framePaddingExact(VerticalTabsConfig config)
+    static double framePaddingExact(CustomGameTabsConfig config)
     {
         return Math.max(
             1.0,
@@ -48,7 +48,7 @@ final class DockMetrics
         );
     }
 
-    static double cornerRadiusExact(VerticalTabsConfig config)
+    static double cornerRadiusExact(CustomGameTabsConfig config)
     {
         return Math.max(
             2.0,
@@ -59,7 +59,7 @@ final class DockMetrics
         );
     }
 
-    static float borderWidth(VerticalTabsConfig config)
+    static float borderWidth(CustomGameTabsConfig config)
     {
         return Math.max(
             0.65f,

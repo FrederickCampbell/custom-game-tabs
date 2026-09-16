@@ -1,4 +1,4 @@
-package com.freddy.verticaltabs;
+package com.freddy.customgametabs;
 
 import java.awt.AlphaComposite;
 import java.awt.Color;

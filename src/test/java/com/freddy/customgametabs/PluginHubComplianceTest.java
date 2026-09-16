@@ -1,4 +1,4 @@
-package com.freddy.verticaltabs;
+package com.freddy.customgametabs;
 
 import java.io.IOException;
 import java.nio.file.Files;

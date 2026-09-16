@@ -1,17 +1,17 @@
-package com.freddy.verticaltabs;
+package com.freddy.customgametabs;
 
 import net.runelite.client.RuneLite;
 import net.runelite.client.externalplugins.ExternalPluginManager;
 
-public final class VerticalTabsPluginTest
+public final class CustomGameTabsPluginTest
 {
-    private VerticalTabsPluginTest()
+    private CustomGameTabsPluginTest()
     {
     }
 
     public static void main(String[] args) throws Exception
     {
-        ExternalPluginManager.loadBuiltin(VerticalTabsPlugin.class);
+        ExternalPluginManager.loadBuiltin(CustomGameTabsPlugin.class);
         RuneLite.main(args);
     }
 }

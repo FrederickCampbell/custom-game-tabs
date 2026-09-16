@@ -1,57 +1,70 @@
-package com.freddy.verticaltabs;
+package com.freddy.customgametabs;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
+import java.awt.Point;
 import java.awt.RenderingHints;
-import java.awt.geom.Rectangle2D;
 import java.awt.geom.RoundRectangle2D;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 
-final class IndividualTabOverlay extends Overlay
+final class CustomGameTabOverlay extends Overlay
 {
     private final Client client;
-    private final VerticalTabsConfig config;
+    private final CustomGameTabsConfig config;
     private final TabIconRenderer iconRenderer;
-    private final SidePanelManager sidePanelManager;
-    private final LooseSnapManager snapManager;
+    private final NativeTabController nativeTabController;
+    private final TabSnapManager snapManager;
+    private final TabTooltipPresenter tooltipPresenter;
     private final int tabIndex;
 
     private volatile boolean hovered;
     private volatile boolean rendered;
+    private volatile boolean customSnapEnabled = true;
+    private volatile Point pendingSnapAbsolute;
 
-    IndividualTabOverlay(
+    CustomGameTabOverlay(
         Client client,
-        VerticalTabsConfig config,
+        CustomGameTabsConfig config,
         TabIconRenderer iconRenderer,
-        SidePanelManager sidePanelManager,
-        LooseSnapManager snapManager,
+        NativeTabController nativeTabController,
+        TabSnapManager snapManager,
+        TabTooltipPresenter tooltipPresenter,
         int tabIndex
     )
     {
         this.client = client;
         this.config = config;
         this.iconRenderer = iconRenderer;
-        this.sidePanelManager = sidePanelManager;
+        this.nativeTabController = nativeTabController;
         this.snapManager = snapManager;
+        this.tooltipPresenter = tooltipPresenter;
         this.tabIndex = tabIndex;
 
         setPosition(OverlayPosition.TOP_RIGHT);
-        setLayer(OverlayLayer.ABOVE_WIDGETS);
+        setLayer(OverlayLayer.MANUAL);
+        drawAfterLayer(InterfaceID.ToplevelPreEoc.MAP_CONTAINER);
         setPriority(PRIORITY_HIGHEST);
         setDragTargetable(true);
+        /* Button-to-button snapping is ours; do not also snap to RuneLite corners. */
+        setSnappable(false);
         setMinimumSize(8);
     }
 
     @Override
     public String getName()
     {
+        /*
+         * OverlayManager persists placement by overlay name. Keep this stable
+         * even when RuneScape changes the current primary action label.
+         */
         return "Game Tab - "
             + LayoutSpec.TABS[tabIndex].getName();
     }
@@ -66,8 +79,8 @@ final class IndividualTabOverlay extends Overlay
         if (
             client.getGameState() != GameState.LOGGED_IN
                 || layout == null
-                || !config.moveSeparately()
-                || !TabLayout.isShown(config, tabIndex)
+                || config.layoutMode() != TabLayoutMode.FREEFORM
+                || TabLayout.state(config, tabIndex) != TabState.MAIN
         )
         {
             rendered = false;
@@ -86,7 +99,7 @@ final class IndividualTabOverlay extends Overlay
             DockMetrics.borderWidth(config);
         final double inset = strokeWidth / 2.0;
         final boolean selected =
-            sidePanelManager.isTabActive(tabIndex);
+            nativeTabController.isTabActive(tabIndex);
         final int opacity = selected
             ? config.selectedOpacity()
             : hovered
@@ -132,6 +145,13 @@ final class IndividualTabOverlay extends Overlay
             opacity
         );
 
+        if (config.showTooltip() && hovered)
+        {
+            tooltipPresenter.showIfAvailable(
+                nativeTabController.getTabName(tabIndex)
+            );
+        }
+
         rendered = true;
         return new Dimension(cellSize, cellSize);
     }
@@ -143,12 +163,11 @@ final class IndividualTabOverlay extends Overlay
 
     boolean contains(int x, int y)
     {
-        return rendered
-            && client.getGameState() == GameState.LOGGED_IN
-            && LayoutSpec.forRoot(client.getTopLevelInterfaceId()) != null
-            && config.moveSeparately()
-            && TabLayout.isShown(config, tabIndex)
-            && getBounds().contains(x, y);
+        /*
+         * Mouse-thread hit testing uses the render snapshot only. render()
+         * already sets rendered=false whenever this overlay is not valid.
+         */
+        return rendered && getBounds().contains(x, y);
     }
 
     void setHovered(boolean hovered)
@@ -156,17 +175,34 @@ final class IndividualTabOverlay extends Overlay
         this.hovered = hovered;
     }
 
+    void setCustomSnapEnabled(boolean enabled)
+    {
+        customSnapEnabled = enabled;
+    }
+
+    void setPendingSnapAbsolute(Point location)
+    {
+        pendingSnapAbsolute = location == null ? null : new Point(location);
+    }
+
+    Point consumePendingSnapAbsolute()
+    {
+        final Point result = pendingSnapAbsolute;
+        pendingSnapAbsolute = null;
+        return result == null ? null : new Point(result);
+    }
+
     @Override
     public boolean onDrag(Overlay other)
     {
-        if (!(other instanceof IndividualTabOverlay))
+        if (!customSnapEnabled || !(other instanceof CustomGameTabOverlay))
         {
             return false;
         }
 
         return snapManager.snap(
             this,
-            (IndividualTabOverlay) other
+            (CustomGameTabOverlay) other
         );
     }
 

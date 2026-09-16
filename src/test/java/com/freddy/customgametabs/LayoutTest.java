@@ -1,4 +1,4 @@
-package com.freddy.verticaltabs;
+package com.freddy.customgametabs;
 
 import java.util.LinkedHashSet;
 import org.junit.Test;
@@ -66,4 +66,38 @@ public class LayoutTest
         assertTrue(parsed.contains(11));
         assertTrue(parsed.contains(LayoutSpec.LOGOUT_TAB));
     }
+    @Test
+    public void mainDrawerHiddenStatesAreMutuallyExclusive()
+    {
+        final CustomGameTabsConfig config = new CustomGameTabsConfig()
+        {
+            @Override public boolean showSkills() { return false; }
+            @Override public String drawerTabs() { return "magic, inventory"; }
+        };
+
+        assertEquals(TabState.MAIN, TabLayout.state(config, 0));
+        assertEquals(TabState.HIDDEN, TabLayout.state(config, 1));
+        assertEquals(TabState.DRAWER, TabLayout.state(config, LayoutSpec.INVENTORY_TAB));
+        assertEquals(TabState.DRAWER, TabLayout.state(config, 6));
+
+        assertTrue(TabLayout.mainOrder(config).contains(0));
+        assertFalse(TabLayout.mainOrder(config).contains(1));
+        assertFalse(TabLayout.mainOrder(config).contains(6));
+        assertTrue(TabLayout.drawerOrder(config).contains(6));
+    }
+
+    @Test
+    public void fullOrderAlwaysContainsEveryTabExactlyOnce()
+    {
+        final CustomGameTabsConfig config = new CustomGameTabsConfig()
+        {
+            @Override public String tabOrder() { return "magic, inventory, magic"; }
+        };
+
+        assertEquals(14, TabLayout.fullOrder(config).size());
+        assertEquals(Integer.valueOf(6), TabLayout.fullOrder(config).get(0));
+        assertEquals(Integer.valueOf(LayoutSpec.INVENTORY_TAB), TabLayout.fullOrder(config).get(1));
+        assertEquals(14, new LinkedHashSet<>(TabLayout.fullOrder(config)).size());
+    }
+
 }

@@ -19,6 +19,7 @@ tools/
 # Local history and reports
 _upgrade_backups/
 .source-backups/
+NATIVE-*-TEST.txt
 *-report.json
 
 # Operating-system and editor files

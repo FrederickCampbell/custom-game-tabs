@@ -1,36 +1,36 @@
-package com.freddy.verticaltabs;
+package com.freddy.customgametabs;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
-import java.awt.FontMetrics;
 import java.awt.Graphics2D;
+import java.awt.Point;
 import java.awt.RenderingHints;
 import java.awt.geom.Rectangle2D;
 import java.awt.geom.RoundRectangle2D;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import javax.inject.Inject;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 
-final class VerticalTabsOverlay extends Overlay
+final class CustomGameTabsOverlay extends Overlay
 {
     private static final Color FRAME_COLOR =
         new Color(28, 21, 15, 255);
-    private static final Color TOOLTIP_BACKGROUND =
-        new Color(28, 21, 15, 238);
-    private static final Color TOOLTIP_BORDER =
-        new Color(145, 108, 48, 245);
 
     private final Client client;
-    private final VerticalTabsConfig config;
+    private final CustomGameTabsConfig config;
     private final TabIconRenderer iconRenderer;
-    private final SidePanelManager sidePanelManager;
+    private final NativeTabController nativeTabController;
+    private final TabTooltipPresenter tooltipPresenter;
     private final Rectangle2D.Double[] buttonBounds =
         new Rectangle2D.Double[LayoutSpec.TABS.length];
 
@@ -38,22 +38,31 @@ final class VerticalTabsOverlay extends Overlay
     private volatile boolean rendered;
 
     @Inject
-    VerticalTabsOverlay(
+    CustomGameTabsOverlay(
         Client client,
-        VerticalTabsConfig config,
+        CustomGameTabsConfig config,
         TabIconRenderer iconRenderer,
-        SidePanelManager sidePanelManager
+        NativeTabController nativeTabController,
+        TabTooltipPresenter tooltipPresenter
     )
     {
         this.client = client;
         this.config = config;
         this.iconRenderer = iconRenderer;
-        this.sidePanelManager = sidePanelManager;
+        this.nativeTabController = nativeTabController;
+        this.tooltipPresenter = tooltipPresenter;
 
         setPosition(OverlayPosition.TOP_RIGHT);
-        setLayer(OverlayLayer.ABOVE_WIDGETS);
+        setLayer(OverlayLayer.MANUAL);
+        drawAfterLayer(InterfaceID.ToplevelPreEoc.MAP_CONTAINER);
         setPriority(PRIORITY_HIGHEST);
         setMinimumSize(8);
+    }
+
+    @Override
+    public String getName()
+    {
+        return "Custom Game Tabs";
     }
 
     @Override
@@ -66,7 +75,7 @@ final class VerticalTabsOverlay extends Overlay
         if (
             client.getGameState() != GameState.LOGGED_IN
                 || layout == null
-                || config.moveSeparately()
+                || config.layoutMode() != TabLayoutMode.DOCKED
         )
         {
             clearBounds();
@@ -74,7 +83,7 @@ final class VerticalTabsOverlay extends Overlay
         }
 
         final List<Integer> order =
-            TabLayout.visibleOrder(config);
+            TabLayout.mainOrder(config);
 
         if (order.isEmpty())
         {
@@ -82,6 +91,7 @@ final class VerticalTabsOverlay extends Overlay
             return null;
         }
 
+        rendered = false;
         Arrays.fill(buttonBounds, null);
         applyQualityHints(graphics);
 
@@ -141,7 +151,7 @@ final class VerticalTabsOverlay extends Overlay
             );
 
             final boolean selected =
-                sidePanelManager.isTabActive(tabIndex);
+                nativeTabController.isTabActive(tabIndex);
             final boolean hovered =
                 hoveredTab == tabIndex;
             final int opacity = selected
@@ -168,10 +178,8 @@ final class VerticalTabsOverlay extends Overlay
                 && hoveredTab < LayoutSpec.TABS.length
         )
         {
-            drawTooltip(
-                graphics,
-                LayoutSpec.TABS[hoveredTab],
-                localBoundsFor(hoveredTab)
+            tooltipPresenter.showIfAvailable(
+                nativeTabController.getTabName(hoveredTab)
             );
         }
 
@@ -194,12 +202,11 @@ final class VerticalTabsOverlay extends Overlay
 
     int tabAt(int x, int y)
     {
-        if (
-            !rendered
-                || client.getGameState() != GameState.LOGGED_IN
-                || LayoutSpec.forRoot(client.getTopLevelInterfaceId()) == null
-                || config.moveSeparately()
-        )
+        /*
+         * This is called by AWT mouse handlers. render() owns all RuneLite
+         * client/widget reads and publishes the current hit-test snapshot.
+         */
+        if (!rendered)
         {
             return -1;
         }
@@ -219,12 +226,7 @@ final class VerticalTabsOverlay extends Overlay
 
     boolean containsInputSurface(int x, int y)
     {
-        if (
-            !rendered
-                || client.getGameState() != GameState.LOGGED_IN
-                || LayoutSpec.forRoot(client.getTopLevelInterfaceId()) == null
-                || config.moveSeparately()
-        )
+        if (!rendered)
         {
             return false;
         }
@@ -235,6 +237,107 @@ final class VerticalTabsOverlay extends Overlay
         }
 
         return getBounds().contains(x, y);
+    }
+
+    Map<Integer, Point> captureButtonLocations()
+    {
+        final Map<Integer, Point> result = new LinkedHashMap<>();
+
+        /*
+         * rendered is volatile and is written after buttonBounds, so a true
+         * read publishes the complete geometry snapshot to non-render threads.
+         */
+        if (!rendered)
+        {
+            return result;
+        }
+
+        for (int index = 0; index < buttonBounds.length; index++)
+        {
+            final Rectangle2D.Double bounds = buttonBounds[index];
+            if (bounds != null)
+            {
+                result.put(
+                    index,
+                    new Point(
+                        (int) Math.round(bounds.x),
+                        (int) Math.round(bounds.y)
+                    )
+                );
+            }
+        }
+
+        return result;
+    }
+
+    Map<Integer, Point> projectButtonLocations()
+    {
+        final List<Integer> order = TabLayout.mainOrder(config);
+        final Map<Integer, Point> result = new LinkedHashMap<>();
+        if (order.isEmpty())
+        {
+            return result;
+        }
+
+        final double buttonSize = DockMetrics.buttonSizeExact(config);
+        final int gap = DockMetrics.gap(config);
+        final double padding = DockMetrics.framePaddingExact(config);
+        final int columns = Math.max(
+            1,
+            Math.min(config.buttonsPerRow(), order.size())
+        );
+        final int projectedWidth = Math.max(
+            1,
+            (int) Math.ceil(
+                columns * buttonSize
+                    + Math.max(0, columns - 1) * gap
+                    + padding * 2.0
+            )
+        );
+
+        final java.awt.Rectangle bounds = getBounds();
+        final Point preferred = getPreferredLocation();
+        final int originX;
+        final int originY;
+
+        if (bounds != null && !bounds.isEmpty())
+        {
+            originX = bounds.x;
+            originY = bounds.y;
+        }
+        else if (preferred != null)
+        {
+            originX = preferred.x;
+            originY = preferred.y;
+        }
+        else
+        {
+            originX = Math.max(
+                0,
+                client.getRealDimensions().width - projectedWidth
+            );
+            originY = 0;
+        }
+
+        for (int position = 0; position < order.size(); position++)
+        {
+            final int tabIndex = order.get(position);
+            final int row = position / columns;
+            final int column = position % columns;
+            result.put(
+                tabIndex,
+                new Point(
+                    (int) Math.round(
+                        originX + padding + column * (buttonSize + gap)
+                    ),
+                    (int) Math.round(
+                        originY + padding + row * (buttonSize + gap)
+                    )
+                )
+            );
+        }
+
+        return result;
     }
 
     void configurationChanged()
@@ -328,64 +431,6 @@ final class VerticalTabsOverlay extends Overlay
             LayoutSpec.TABS[tabIndex],
             shape.getBounds2D(),
             opacity
-        );
-    }
-
-    private Rectangle2D.Double localBoundsFor(int tabIndex)
-    {
-        final Rectangle2D.Double absolute =
-            buttonBounds[tabIndex];
-
-        if (absolute == null)
-        {
-            return null;
-        }
-
-        return new Rectangle2D.Double(
-            absolute.x - getBounds().x,
-            absolute.y - getBounds().y,
-            absolute.width,
-            absolute.height
-        );
-    }
-
-    private void drawTooltip(
-        Graphics2D graphics,
-        TabDefinition tab,
-        Rectangle2D button
-    )
-    {
-        if (button == null)
-        {
-            return;
-        }
-
-        final FontMetrics metrics = graphics.getFontMetrics();
-        final int padding = 6;
-        final int width =
-            metrics.stringWidth(tab.getName()) + padding * 2;
-        final int height =
-            metrics.getHeight() + padding;
-        final boolean dockOnLeftHalf =
-            getBounds().getCenterX()
-                < client.getCanvasWidth() / 2.0;
-        final int x = dockOnLeftHalf
-            ? (int) Math.ceil(button.getMaxX()) + 7
-            : (int) Math.floor(button.getX()) - width - 7;
-        final int y = (int) Math.round(
-            button.getY()
-                + (button.getHeight() - height) / 2.0
-        );
-
-        graphics.setColor(TOOLTIP_BACKGROUND);
-        graphics.fillRoundRect(x, y, width, height, 5, 5);
-        graphics.setColor(TOOLTIP_BORDER);
-        graphics.drawRoundRect(x, y, width, height, 5, 5);
-        graphics.setColor(new Color(238, 216, 158));
-        graphics.drawString(
-            tab.getName(),
-            x + padding,
-            y + padding / 2 + metrics.getAscent()
         );
     }
 
