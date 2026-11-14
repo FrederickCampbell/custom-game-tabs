@@ -1,5 +1,6 @@
 package com.freddy.customgametabs;
 
+import java.util.Arrays;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.Client;
@@ -105,9 +106,10 @@ final class NativeTabController
         );
 
         if (
-            layout == null
+            client.getGameState() != GameState.LOGGED_IN
+                || layout == null
                 || !LayoutSpec.isValidTab(tabIndex)
-                || op < 1
+                || op < 1 || op > 10
         )
         {
             return;
@@ -185,7 +187,10 @@ final class NativeTabController
             }
         }
 
-        tabNames = refreshed;
+        if (!Arrays.equals(tabNames, refreshed))
+        {
+            tabNames = refreshed;
+        }
     }
 
     private boolean invokeNativeTabListener(

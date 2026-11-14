@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+- Fix Stretched Mode listener ordering and invalidate hit regions when overlays are not drawn.
+- Serialize freeform gestures on the client thread and cancel stale queued input during lifecycle transitions.
+- Make drawer animation target changes idempotent and hit testing follow paint order.
+- Wrap oversized drawers and adapt dock columns to the available logical viewport without rewriting preferences.
+- Respect widget/global sprite overrides and improve narrow-sidebar controls, accessible names and explanations.
+- Cache unchanged snapshots, remove redundant snapping code, reduce diagnostic logging, and add Java 11 CI and behavioral regression tests.
+- Preserve config keys and existing preset formats. Live game acceptance, including the reported Combat/sailing issue, remains pending; see docs/MANUAL_TEST_PLAN.md.
+
 ## 2.2.2 - 2026-09-15
 - Upgrade new activity presets to snapshot v3 so **Save/Load** restores button size/spacing, opacity, tooltip visibility, and normal/hover/active/border colors exactly as saved.
 - Keep v1/v2 presets backward-compatible without inventing appearance they never recorded; loading them preserves the current appearance until they are re-saved as v3.

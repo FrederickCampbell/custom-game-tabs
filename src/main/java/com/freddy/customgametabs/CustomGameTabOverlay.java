@@ -4,7 +4,8 @@ import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
-import java.awt.Point;
+import java.awt.Rectangle;
+import java.util.Collections;
 import java.awt.RenderingHints;
 import java.awt.geom.RoundRectangle2D;
 import net.runelite.api.Client;
@@ -21,21 +22,17 @@ final class CustomGameTabOverlay extends Overlay
     private final CustomGameTabsConfig config;
     private final TabIconRenderer iconRenderer;
     private final NativeTabController nativeTabController;
-    private final TabSnapManager snapManager;
     private final TabTooltipPresenter tooltipPresenter;
     private final int tabIndex;
 
     private volatile boolean hovered;
-    private volatile boolean rendered;
-    private volatile boolean customSnapEnabled = true;
-    private volatile Point pendingSnapAbsolute;
+    private volatile TabHitRegions hitRegions = TabHitRegions.EMPTY;
 
     CustomGameTabOverlay(
         Client client,
         CustomGameTabsConfig config,
         TabIconRenderer iconRenderer,
         NativeTabController nativeTabController,
-        TabSnapManager snapManager,
         TabTooltipPresenter tooltipPresenter,
         int tabIndex
     )
@@ -44,7 +41,6 @@ final class CustomGameTabOverlay extends Overlay
         this.config = config;
         this.iconRenderer = iconRenderer;
         this.nativeTabController = nativeTabController;
-        this.snapManager = snapManager;
         this.tooltipPresenter = tooltipPresenter;
         this.tabIndex = tabIndex;
 
@@ -52,7 +48,8 @@ final class CustomGameTabOverlay extends Overlay
         setLayer(OverlayLayer.MANUAL);
         drawAfterLayer(InterfaceID.ToplevelPreEoc.MAP_CONTAINER);
         setPriority(PRIORITY_HIGHEST);
-        setDragTargetable(true);
+        setMovable(false);
+        setDragTargetable(false);
         /* Button-to-button snapping is ours; do not also snap to RuneLite corners. */
         setSnappable(false);
         setMinimumSize(8);
@@ -83,7 +80,7 @@ final class CustomGameTabOverlay extends Overlay
                 || TabLayout.state(config, tabIndex) != TabState.MAIN
         )
         {
-            rendered = false;
+            clearBounds();
             return null;
         }
 
@@ -152,7 +149,8 @@ final class CustomGameTabOverlay extends Overlay
             );
         }
 
-        rendered = true;
+        hitRegions = new TabHitRegions(null, null, Collections.singletonMap(
+            tabIndex, new Rectangle(getBounds().x, getBounds().y, cellSize, cellSize)));
         return new Dimension(cellSize, cellSize);
     }
 
@@ -163,47 +161,23 @@ final class CustomGameTabOverlay extends Overlay
 
     boolean contains(int x, int y)
     {
-        /*
-         * Mouse-thread hit testing uses the render snapshot only. render()
-         * already sets rendered=false whenever this overlay is not valid.
-         */
-        return rendered && getBounds().contains(x, y);
+        return hitRegions.contains(x, y);
+    }
+
+    void invalidateHitRegions()
+    {
+        hitRegions = TabHitRegions.EMPTY;
+    }
+
+    void clearBounds()
+    {
+        hitRegions = TabHitRegions.EMPTY;
+        hovered = false;
     }
 
     void setHovered(boolean hovered)
     {
         this.hovered = hovered;
-    }
-
-    void setCustomSnapEnabled(boolean enabled)
-    {
-        customSnapEnabled = enabled;
-    }
-
-    void setPendingSnapAbsolute(Point location)
-    {
-        pendingSnapAbsolute = location == null ? null : new Point(location);
-    }
-
-    Point consumePendingSnapAbsolute()
-    {
-        final Point result = pendingSnapAbsolute;
-        pendingSnapAbsolute = null;
-        return result == null ? null : new Point(result);
-    }
-
-    @Override
-    public boolean onDrag(Overlay other)
-    {
-        if (!customSnapEnabled || !(other instanceof CustomGameTabOverlay))
-        {
-            return false;
-        }
-
-        return snapManager.snap(
-            this,
-            (CustomGameTabOverlay) other
-        );
     }
 
     private static void applyQualityHints(Graphics2D graphics)

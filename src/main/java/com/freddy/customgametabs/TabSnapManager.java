@@ -6,7 +6,6 @@ import java.util.Collection;
 import java.util.List;
 import javax.inject.Inject;
 import javax.inject.Singleton;
-import net.runelite.client.ui.overlay.OverlayManager;
 
 /**
  * One-shot magnetic placement for loose buttons.
@@ -20,16 +19,13 @@ import net.runelite.client.ui.overlay.OverlayManager;
 final class TabSnapManager
 {
     private final CustomGameTabsConfig config;
-    private final OverlayManager overlayManager;
 
     @Inject
     TabSnapManager(
-        CustomGameTabsConfig config,
-        OverlayManager overlayManager
+        CustomGameTabsConfig config
     )
     {
         this.config = config;
-        this.overlayManager = overlayManager;
     }
 
     static final class SnapResult
@@ -115,58 +111,6 @@ final class TabSnapManager
         }
 
         return best;
-    }
-
-    boolean snap(
-        CustomGameTabOverlay target,
-        CustomGameTabOverlay moving
-    )
-    {
-        if (!config.snapLooseButtons() || target == moving)
-        {
-            return false;
-        }
-
-        final Rectangle targetBounds = target.getBounds();
-        final Rectangle movingBounds = moving.getBounds();
-        final Point preferred = moving.getPreferredLocation();
-
-        /*
-         * While RuneLite is actively Alt-dragging a detached overlay it has a
-         * preferred location. If that invariant is ever false, decline the
-         * custom snap and let RuneLite finish/save the drag normally.
-         */
-        if (preferred == null
-            || targetBounds.isEmpty()
-            || movingBounds.isEmpty())
-        {
-            return false;
-        }
-
-        final SnapDirection direction = directionFor(
-            targetBounds,
-            movingBounds
-        );
-        final int gap = DockMetrics.gap(config);
-        final Point desired = adjacentLocation(
-            targetBounds,
-            movingBounds,
-            direction,
-            gap
-        );
-
-        final Point adjusted = new Point(preferred);
-        adjusted.translate(
-            desired.x - movingBounds.x,
-            desired.y - movingBounds.y
-        );
-
-        moving.setPendingSnapAbsolute(desired);
-        moving.setPreferredPosition(null);
-        moving.setPreferredLocation(adjusted);
-        moving.revalidate();
-        overlayManager.saveOverlay(moving);
-        return true;
     }
 
     private static SnapDirection directionFor(

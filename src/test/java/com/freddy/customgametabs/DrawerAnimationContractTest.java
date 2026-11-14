@@ -1,27 +1,34 @@
 package com.freddy.customgametabs;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import org.junit.Test;
-
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 public class DrawerAnimationContractTest
 {
     @Test
-    public void drawerUsesStableHandleGeometryAndAnimatedExpansion() throws IOException
+    public void repeatedTickUpdatesDoNotRestartAnimation()
     {
-        final String source = Files.readString(
-            Path.of(
-                "src", "main", "java", "com", "freddy", "customgametabs",
-                "DrawerOverlay.java"
-            )
-        );
+        DrawerAnimation animation = new DrawerAnimation();
+        long start = 1_000_000_000L;
+        animation.setExpanded(true, start);
+        for (int ms = 20; ms <= 160; ms += 20)
+        {
+            animation.setExpanded(true, start + ms * 1_000_000L);
+        }
+        assertEquals(1, animation.progress(start + DrawerAnimation.DURATION_NANOS), 0);
+    }
 
-        assertTrue(source.contains("ANIMATION_NANOS = 170_000_000L"));
-        assertTrue(source.contains("final double animation = animationProgress();"));
-        assertTrue(source.contains("setMovable(false);"));
-        assertTrue(source.contains("localHandleOffset(\n            effectiveDirection,\n            true,"));
+    @Test
+    public void reversingMidAnimationPreservesContinuityAndFinishes()
+    {
+        DrawerAnimation animation = new DrawerAnimation();
+        long start = 1_000_000_000L;
+        animation.setExpanded(true, start);
+        long reverse = start + DrawerAnimation.DURATION_NANOS / 2;
+        double before = animation.progress(reverse);
+        assertTrue(before > 0 && before < 1);
+        animation.setExpanded(false, reverse);
+        assertEquals(before, animation.progress(reverse), 0);
+        assertEquals(0, animation.progress(reverse + DrawerAnimation.DURATION_NANOS), 0);
     }
 }

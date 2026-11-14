@@ -9,7 +9,8 @@ import java.awt.Polygon;
 import java.awt.RenderingHints;
 import java.awt.geom.Rectangle2D;
 import java.awt.geom.RoundRectangle2D;
-import java.util.Arrays;
+import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.List;
 import javax.inject.Inject;
 import net.runelite.api.Client;
@@ -26,7 +27,7 @@ final class DrawerOverlay extends Overlay
     private static final Color HANDLE_FILL = new Color(49, 38, 26, 245);
     private static final Color ARROW_GOLD = new Color(219, 166, 67);
     private static final Color ARROW_OUTLINE = new Color(79, 54, 28);
-    private static final long ANIMATION_NANOS = 170_000_000L;
+    private final DrawerAnimation animation = new DrawerAnimation();
 
     private final Client client;
     private final CustomGameTabsConfig config;
@@ -34,13 +35,8 @@ final class DrawerOverlay extends Overlay
     private final NativeTabController nativeTabController;
     private final TabTooltipPresenter tooltipPresenter;
 
-    private final Rectangle2D.Double[] buttonBounds =
-        new Rectangle2D.Double[LayoutSpec.TABS.length];
-    private volatile Rectangle2D.Double handleBounds;
-    private volatile boolean rendered;
+    private volatile TabHitRegions hitRegions = TabHitRegions.EMPTY;
     private volatile boolean expanded;
-    private volatile double animationFrom;
-    private volatile long animationStartNanos;
     private volatile DrawerDirection effectiveDirection = DrawerDirection.LEFT;
     private volatile int hoveredTab = -1;
     private volatile boolean hoveredHandle;
@@ -66,6 +62,7 @@ final class DrawerOverlay extends Overlay
         /* Non-dynamic overlays with lower priority draw later. Keep drawer over CGT tabs. */
         setPriority(PRIORITY_HIGH);
         setSnappable(false);
+        setMovable(false);
         setDragTargetable(false);
         setMinimumSize(8);
     }
@@ -91,41 +88,22 @@ final class DrawerOverlay extends Overlay
             return null;
         }
 
-        rendered = false;
-        Arrays.fill(buttonBounds, null);
+        final Map<Integer, Rectangle2D> buttonBounds = new LinkedHashMap<>();
         applyQualityHints(graphics);
 
         final int cell = DockMetrics.buttonCellSize(config);
         final double buttonSize = DockMetrics.buttonSizeExact(config);
-        final int gap = DockMetrics.gap(config);
         final double radius = DockMetrics.cornerRadiusExact(config);
         final double animation = animationProgress();
 
         /* Keep the handle at one stable local offset whether open or closed.
          * CGT owns input/movement, so a full transparent layout rectangle cannot
          * accidentally become a native RuneLite drag surface. */
-        final Point handleOffset = localHandleOffset(
-            effectiveDirection,
-            true,
-            drawerTabs.size(),
-            cell,
-            gap
-        );
-
-        final int totalWidth = contentWidth(
-            effectiveDirection,
-            true,
-            drawerTabs.size(),
-            cell,
-            gap
-        );
-        final int totalHeight = contentHeight(
-            effectiveDirection,
-            true,
-            drawerTabs.size(),
-            cell,
-            gap
-        );
+        final DrawerGeometry geometry = geometry(drawerTabs.size());
+        final Point handleOffset = geometry.handleOffset();
+        final Dimension content = geometry.size();
+        final int totalWidth = content.width;
+        final int totalHeight = content.height;
 
         final Rectangle2D.Double localHandle = new Rectangle2D.Double(
             handleOffset.x,
@@ -134,8 +112,7 @@ final class DrawerOverlay extends Overlay
             cell
         );
 
-        drawHandle(graphics, localHandle, radius);
-        handleBounds = new Rectangle2D.Double(
+        final Rectangle2D handleBounds = new Rectangle2D.Double(
             getBounds().x + localHandle.x,
             getBounds().y + localHandle.y,
             localHandle.width,
@@ -147,13 +124,7 @@ final class DrawerOverlay extends Overlay
             for (int position = 0; position < drawerTabs.size(); position++)
             {
                 final int tabIndex = drawerTabs.get(position);
-                final Point tabOffset = drawerTabOffset(
-                    effectiveDirection,
-                    position,
-                    drawerTabs.size(),
-                    cell,
-                    gap
-                );
+                final Point tabOffset = geometry.tabOffset(position);
                 final double animatedX = handleOffset.x
                     + (tabOffset.x - handleOffset.x) * animation;
                 final double animatedY = handleOffset.y
@@ -165,12 +136,12 @@ final class DrawerOverlay extends Overlay
                     buttonSize
                 );
 
-                buttonBounds[tabIndex] = new Rectangle2D.Double(
+                buttonBounds.put(tabIndex, new Rectangle2D.Double(
                     getBounds().x + localBounds.x,
                     getBounds().y + localBounds.y,
                     localBounds.width,
                     localBounds.height
-                );
+                ));
 
                 final boolean selected = nativeTabController.isTabActive(tabIndex);
                 final boolean hovered = hoveredTab == tabIndex;
@@ -197,30 +168,20 @@ final class DrawerOverlay extends Overlay
             tooltipPresenter.showIfAvailable(nativeTabController.getTabName(hoveredTab));
         }
 
-        rendered = true;
+        // Paint the handle last so its click target matches the visible top layer.
+        drawHandle(graphics, localHandle, radius);
+        hitRegions = new TabHitRegions(null, handleBounds, buttonBounds);
         return new Dimension(Math.max(1, totalWidth), Math.max(1, totalHeight));
-    }
-
-    void setFreeformMovable(boolean movable)
-    {
-        /* CGT moves the handle itself. Keeping this non-movable prevents the
-         * generic OverlayRenderer from treating transparent drawer bounds as an
-         * Alt-drag target. */
-        setMovable(false);
     }
 
     void setExpanded(boolean expanded)
     {
-        final double current = animationProgress();
-        final double target = expanded ? 1.0 : 0.0;
-        if (this.expanded == expanded && Math.abs(current - target) < 0.001)
+        if (this.expanded == expanded)
         {
             return;
         }
-
-        animationFrom = current;
+        animation.setExpanded(expanded, System.nanoTime());
         this.expanded = expanded;
-        animationStartNanos = System.nanoTime();
         revalidate();
     }
 
@@ -231,10 +192,13 @@ final class DrawerOverlay extends Overlay
 
     void setEffectiveDirection(DrawerDirection direction)
     {
-        effectiveDirection = direction == null || direction == DrawerDirection.AUTO
-            ? DrawerDirection.LEFT
-            : direction;
-        revalidate();
+        final DrawerDirection resolved = direction == null || direction == DrawerDirection.AUTO
+            ? DrawerDirection.LEFT : direction;
+        if (effectiveDirection != resolved)
+        {
+            effectiveDirection = resolved;
+            revalidate();
+        }
     }
 
     DrawerDirection getEffectiveDirection()
@@ -244,42 +208,26 @@ final class DrawerOverlay extends Overlay
 
     int tabAt(int x, int y)
     {
-        if (!rendered)
-        {
-            return -1;
-        }
-        for (int tab = 0; tab < buttonBounds.length; tab++)
-        {
-            final Rectangle2D bounds = buttonBounds[tab];
-            if (bounds != null && bounds.contains(x, y))
-            {
-                return tab;
-            }
-        }
-        return -1;
+        final TabHitRegions regions = hitRegions;
+        return regions.handleContains(x, y) ? -1 : regions.tabAt(x, y);
     }
 
     boolean handleContains(int x, int y)
     {
-        final Rectangle2D bounds = handleBounds;
-        return rendered && bounds != null && bounds.contains(x, y);
+        return hitRegions.handleContains(x, y);
     }
 
     boolean containsInputSurface(int x, int y)
     {
-        if (!rendered)
-        {
-            return false;
-        }
-        return handleContains(x, y) || tabAt(x, y) >= 0;
+        return hitRegions.contains(x, y);
     }
 
     Point getHandleLocation()
     {
-        final Rectangle2D bounds = handleBounds;
-        if (rendered && bounds != null)
+        final Point location = hitRegions.handleLocation();
+        if (location != null)
         {
-            return new Point((int) Math.round(bounds.getX()), (int) Math.round(bounds.getY()));
+            return location;
         }
 
         final Point preferred = getPreferredLocation();
@@ -288,38 +236,26 @@ final class DrawerOverlay extends Overlay
             return null;
         }
         final List<Integer> drawerTabs = TabLayout.drawerOrder(config);
-        final Point offset = localHandleOffset(
-            effectiveDirection,
-            true,
-            drawerTabs.size(),
-            DockMetrics.buttonCellSize(config),
-            DockMetrics.gap(config)
-        );
+        final Point offset = geometry(drawerTabs.size()).handleOffset();
         return new Point(preferred.x + offset.x, preferred.y + offset.y);
     }
 
     Point topLeftForHandle(Point handleLocation)
     {
         final List<Integer> drawerTabs = TabLayout.drawerOrder(config);
-        final Point offset = localHandleOffset(
-            effectiveDirection,
-            true,
-            drawerTabs.size(),
-            DockMetrics.buttonCellSize(config),
-            DockMetrics.gap(config)
-        );
+        final Point offset = geometry(drawerTabs.size()).handleOffset();
         return new Point(handleLocation.x - offset.x, handleLocation.y - offset.y);
     }
 
     Dimension contentSize()
     {
-        final List<Integer> drawerTabs = TabLayout.drawerOrder(config);
-        final int cell = DockMetrics.buttonCellSize(config);
-        final int gap = DockMetrics.gap(config);
-        return new Dimension(
-            contentWidth(effectiveDirection, true, drawerTabs.size(), cell, gap),
-            contentHeight(effectiveDirection, true, drawerTabs.size(), cell, gap)
-        );
+        return geometry(TabLayout.drawerOrder(config).size()).size();
+    }
+
+    private DrawerGeometry geometry(int count)
+    {
+        return new DrawerGeometry(effectiveDirection, count, DockMetrics.buttonCellSize(config),
+            DockMetrics.gap(config), client.getRealDimensions());
     }
 
     void onMouseMoved(int x, int y)
@@ -412,23 +348,7 @@ final class DrawerOverlay extends Overlay
 
     private double animationProgress()
     {
-        final double target = expanded ? 1.0 : 0.0;
-        final long started = animationStartNanos;
-        if (started == 0L)
-        {
-            return target;
-        }
-
-        final double elapsed = Math.max(0.0, System.nanoTime() - started);
-        final double linear = Math.min(1.0, elapsed / ANIMATION_NANOS);
-        if (linear >= 1.0)
-        {
-            return target;
-        }
-
-        /* Cubic ease-out: responsive at the click, gentle at the final slot. */
-        final double eased = 1.0 - Math.pow(1.0 - linear, 3.0);
-        return animationFrom + (target - animationFrom) * eased;
+        return animation.progress(System.nanoTime());
     }
 
     private static DrawerDirection opposite(DrawerDirection direction)
@@ -475,80 +395,6 @@ final class DrawerOverlay extends Overlay
         }
     }
 
-    private static Point localHandleOffset(
-        DrawerDirection direction,
-        boolean expanded,
-        int count,
-        int cell,
-        int gap
-    )
-    {
-        if (!expanded || count <= 0)
-        {
-            return new Point(0, 0);
-        }
-        final int extent = count * (cell + gap);
-        switch (direction)
-        {
-            case LEFT: return new Point(extent, 0);
-            case UP: return new Point(0, extent);
-            default: return new Point(0, 0);
-        }
-    }
-
-    private static Point drawerTabOffset(
-        DrawerDirection direction,
-        int position,
-        int count,
-        int cell,
-        int gap
-    )
-    {
-        final int step = cell + gap;
-        switch (direction)
-        {
-            case LEFT:
-                return new Point((count - 1 - position) * step, 0);
-            case RIGHT:
-                return new Point((position + 1) * step, 0);
-            case UP:
-                return new Point(0, (count - 1 - position) * step);
-            case DOWN:
-            default:
-                return new Point(0, (position + 1) * step);
-        }
-    }
-
-    private static int contentWidth(
-        DrawerDirection direction,
-        boolean expanded,
-        int count,
-        int cell,
-        int gap
-    )
-    {
-        if (expanded && count > 0 && (direction == DrawerDirection.LEFT || direction == DrawerDirection.RIGHT))
-        {
-            return (count + 1) * cell + count * gap;
-        }
-        return cell;
-    }
-
-    private static int contentHeight(
-        DrawerDirection direction,
-        boolean expanded,
-        int count,
-        int cell,
-        int gap
-    )
-    {
-        if (expanded && count > 0 && (direction == DrawerDirection.UP || direction == DrawerDirection.DOWN))
-        {
-            return (count + 1) * cell + count * gap;
-        }
-        return cell;
-    }
-
     private static void applyQualityHints(Graphics2D graphics)
     {
         graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
@@ -563,11 +409,14 @@ final class DrawerOverlay extends Overlay
         return new Color(color.getRed(), color.getGreen(), color.getBlue(), Math.max(0, Math.min(255, alpha)));
     }
 
-    private void clearBounds()
+    void invalidateHitRegions()
     {
-        rendered = false;
-        handleBounds = null;
-        Arrays.fill(buttonBounds, null);
+        hitRegions = TabHitRegions.EMPTY;
+    }
+
+    void clearBounds()
+    {
+        hitRegions = TabHitRegions.EMPTY;
         hoveredTab = -1;
         hoveredHandle = false;
     }

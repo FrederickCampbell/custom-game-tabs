@@ -1,5 +1,8 @@
 package com.freddy.customgametabs;
 
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.client.config.ConfigManager;
@@ -15,6 +18,9 @@ final class ActivityLayoutStore
     private static final String WORKING_KEY = "freeformWorking";
 
     private final ConfigManager configManager;
+    // At most five keys. Compare raw text so profile switches and external edits invalidate naturally.
+    private final Map<String, String> encodedCache = new HashMap<>();
+    private final Map<String, ActivityLayoutSnapshot> snapshotCache = new HashMap<>();
 
     @Inject
     ActivityLayoutStore(ConfigManager configManager)
@@ -88,11 +94,15 @@ final class ActivityLayoutStore
         configManager.unsetConfiguration(CustomGameTabsConfig.GROUP, WORKING_KEY);
     }
 
-    private ActivityLayoutSnapshot load(String key)
+    private synchronized ActivityLayoutSnapshot load(String key)
     {
-        return ActivityLayoutSnapshot.parse(
-            configManager.getConfiguration(CustomGameTabsConfig.GROUP, key)
-        );
+        final String encoded = configManager.getConfiguration(CustomGameTabsConfig.GROUP, key);
+        if (!encodedCache.containsKey(key) || !Objects.equals(encodedCache.get(key), encoded))
+        {
+            encodedCache.put(key, encoded);
+            snapshotCache.put(key, ActivityLayoutSnapshot.parse(encoded));
+        }
+        return snapshotCache.get(key);
     }
 
     private void save(String key, ActivityLayoutSnapshot snapshot)

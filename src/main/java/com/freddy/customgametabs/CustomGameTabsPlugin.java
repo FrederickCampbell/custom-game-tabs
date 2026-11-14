@@ -7,6 +7,7 @@ import java.awt.Rectangle;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -17,6 +18,7 @@ import javax.swing.SwingUtilities;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.events.GameStateChanged;
+import net.runelite.api.events.BeforeRender;
 import net.runelite.api.events.PostClientTick;
 import net.runelite.api.events.PostMenuSort;
 import net.runelite.api.events.VarClientIntChanged;
@@ -65,12 +67,17 @@ public class CustomGameTabsPlugin extends Plugin
     @Inject private NativeTabMenuBridge nativeTabMenuBridge;
     @Inject private CustomGameTabsConfig config;
 
-    private final List<CustomGameTabOverlay> looseOverlays = new ArrayList<>();
+    private final List<CustomGameTabOverlay> looseOverlays = new CopyOnWriteArrayList<>();
+    private volatile boolean running;
+    private volatile boolean inputAvailable;
+    private volatile long inputGeneration;
+    private volatile long lifecycleGeneration;
+    private boolean dragCaptured;
 
-    private TabLayoutsPanel layoutsPanel;
-    private NavigationButton layoutsNavigation;
+    private volatile TabLayoutsPanel layoutsPanel;
+    private volatile NavigationButton layoutsNavigation;
     private StickyGroups stickyGroups = new StickyGroups();
-    private boolean drawerExpanded;
+    private volatile boolean drawerExpanded;
     private boolean applyingActivityLayout;
     private int restoreWorkingCountdown;
     private int lastCanvasWidth = -1;
@@ -119,9 +126,11 @@ public class CustomGameTabsPlugin extends Plugin
                 return event;
             }
 
-            if (altDragGesture)
+            if (dragCaptured)
             {
-                previewAltDrag(event.getX(), event.getY());
+                final int x = event.getX();
+                final int y = event.getY();
+                queueInput(() -> previewAltDrag(x, y));
                 event.consume();
                 return event;
             }
@@ -149,22 +158,27 @@ public class CustomGameTabsPlugin extends Plugin
             if (client.isMenuOpen())
             {
                 resetClickGesture();
-                resetAltDrag();
+                dragCaptured = false;
+                queueInput(CustomGameTabsPlugin.this::resetAltDrag);
                 return event;
             }
 
             if (event.isAltDown() && SwingUtilities.isLeftMouseButton(event))
             {
-                beginAltDrag(event.getX(), event.getY());
-                if (altDragGesture)
+                final int x = event.getX();
+                final int y = event.getY();
+                dragCaptured = config.layoutMode() == TabLayoutMode.FREEFORM && ownsInputSurface(x, y);
+                if (dragCaptured)
                 {
+                    queueInput(() -> beginAltDrag(x, y));
                     suppressNextLeftClick = true;
                     event.consume();
                 }
                 return event;
             }
 
-            resetAltDrag();
+            dragCaptured = false;
+            queueInput(CustomGameTabsPlugin.this::resetAltDrag);
             final int x = event.getX();
             final int y = event.getY();
             if (!ownsInputSurface(x, y) || !SwingUtilities.isLeftMouseButton(event))
@@ -178,7 +192,7 @@ public class CustomGameTabsPlugin extends Plugin
 
             if (drawerOverlay.handleContains(x, y))
             {
-                clientThread.invoke(CustomGameTabsPlugin.this::toggleDrawer);
+                queueInput(CustomGameTabsPlugin.this::toggleDrawer);
                 return event;
             }
 
@@ -186,7 +200,7 @@ public class CustomGameTabsPlugin extends Plugin
             if (tabIndex >= 0)
             {
                 final boolean fromDrawer = drawerOverlay.tabAt(x, y) == tabIndex;
-                clientThread.invoke(() ->
+                queueInput(() ->
                 {
                     nativeTabController.activateTab(tabIndex);
                     if (fromDrawer && config.drawerCloseAfterSelection())
@@ -201,30 +215,24 @@ public class CustomGameTabsPlugin extends Plugin
         @Override
         public MouseEvent mouseReleased(MouseEvent event)
         {
-            if (altDragGesture)
+            if (dragCaptured)
             {
-                final boolean drawer = altDragDrawer;
-                final int tab = altDragTab;
-                final int startX = dragStartMouseX;
-                final int startY = dragStartMouseY;
+                if (!SwingUtilities.isLeftMouseButton(event))
+                {
+                    return event;
+                }
                 final int endX = event.getX();
                 final int endY = event.getY();
-                final Point drawerStart = dragStartDrawerHandle == null
-                    ? null
-                    : new Point(dragStartDrawerHandle);
-                final Map<Integer, Point> starts = copyPoints(dragStartLocations);
-                resetAltDrag();
-
-                clientThread.invokeLater(() -> finishAltDrag(
-                    drawer,
-                    tab,
-                    startX,
-                    startY,
-                    endX,
-                    endY,
-                    drawerStart,
-                    starts
-                ));
+                dragCaptured = false;
+                queueInput(() ->
+                {
+                    if (altDragGesture)
+                    {
+                        finishAltDrag(altDragDrawer, altDragTab, dragStartMouseX, dragStartMouseY,
+                            endX, endY, dragStartDrawerHandle, copyPoints(dragStartLocations));
+                        resetAltDrag();
+                    }
+                });
                 event.consume();
                 return event;
             }
@@ -264,12 +272,32 @@ public class CustomGameTabsPlugin extends Plugin
     @Override
     protected void startUp()
     {
-        migrateLegacyConfiguration();
+        running = true;
+        final long generation = lifecycleGeneration;
+        clientThread.invoke(() ->
+        {
+            if (running && generation == lifecycleGeneration)
+            {
+                initialize();
+            }
+        });
+    }
+
+    private void initialize()
+    {
+        applyingActivityLayout = true;
+        try
+        {
+            migrateLegacyConfiguration();
+        }
+        finally
+        {
+            applyingActivityLayout = false;
+        }
         nativeTabController.startUp();
-        /* Run before RuneLite's generic OverlayRenderer. Consuming an owned
-         * Alt-drag here prevents both native overlay dragging and camera input. */
-        mouseManager.registerMouseListener(0, mouseAdapter);
-        log.info("[CGT 2.2.2] input listener registered at position 0");
+        // Append after RuneLite's coordinate translator, independent of plugin startup order.
+        // Freeform overlays are non-movable to the generic mover; CGT owns their gestures.
+        mouseManager.registerMouseListener(mouseAdapter);
 
         final Dimension startupDimensions = client.getRealDimensions();
         lastCanvasWidth = startupDimensions.width;
@@ -304,22 +332,58 @@ public class CustomGameTabsPlugin extends Plugin
     @Override
     protected void shutDown()
     {
-        if (client.getGameState() == GameState.LOGGED_IN)
-        {
-            saveWorkingSnapshot();
-        }
-
+        running = false;
+        lifecycleGeneration++;
+        inputAvailable = false;
+        inputGeneration++;
         mouseManager.unregisterMouseListener(mouseAdapter);
         resetClickGesture();
-        resetAltDrag();
+        dragCaptured = false;
         sidePanelBounds = new Rectangle[0];
-        removeAllOverlays();
         removeLayoutsNavigation();
         clientThread.invoke(() ->
         {
+            if (client.getGameState() == GameState.LOGGED_IN)
+            {
+                saveWorkingSnapshot();
+            }
+            removeAllOverlays();
+            iconRenderer.clear();
             nativeTabController.shutDown();
             nativeTabPresentation.restoreAll();
         });
+    }
+
+    private void queueInput(Runnable action)
+    {
+        final long generation = inputGeneration;
+        clientThread.invokeLater(() ->
+        {
+            if (running && generation == inputGeneration
+                && client.getGameState() == GameState.LOGGED_IN
+                && LayoutSpec.forRoot(client.getTopLevelInterfaceId()) != null)
+            {
+                action.run();
+            }
+        });
+    }
+
+    @Subscribe
+    public void onBeforeRender(BeforeRender event)
+    {
+        // MANUAL overlays are not called at all when their layer disappears.
+        // A hit region must be republished by a successful render this frame.
+        invalidateHitRegions();
+    }
+
+    private void invalidateHitRegions()
+    {
+        dockOverlay.invalidateHitRegions();
+        drawerOverlay.invalidateHitRegions();
+        for (CustomGameTabOverlay overlay : looseOverlays)
+        {
+            overlay.invalidateHitRegions();
+        }
     }
 
     @Provides
@@ -398,6 +462,8 @@ public class CustomGameTabsPlugin extends Plugin
     {
         if (event.getGroupId() == InterfaceID.TOPLEVEL_PRE_EOC)
         {
+            inputGeneration++;
+            invalidateHitRegions();
             nativeTabPresentation.restoreAll();
             nativeTabController.onTopLevelRebuilt();
             clientThread.invokeLater(nativeTabPresentation::update);
@@ -411,8 +477,15 @@ public class CustomGameTabsPlugin extends Plugin
     @Subscribe
     public void onProfileChanged(ProfileChanged event)
     {
+        inputAvailable = false;
+        inputGeneration++;
+        invalidateHitRegions();
         clientThread.invokeLater(() ->
         {
+            if (!running)
+            {
+                return;
+            }
             nativeTabController.startUp();
             nativeTabPresentation.restoreAll();
             nativeTabPresentation.update();
@@ -453,10 +526,15 @@ public class CustomGameTabsPlugin extends Plugin
          * working layout with a transient default/top-right anchor. */
         if (state != GameState.LOGGED_IN)
         {
+            inputAvailable = false;
+            inputGeneration++;
+            invalidateHitRegions();
+            resetAltDrag();
             restoreWorkingCountdown = 0;
             sidePanelBounds = new Rectangle[0];
         }
 
+        refreshLayoutsPanel();
         nativeTabController.onGameStateChanged(state);
 
         if (state == GameState.LOGGED_IN)
@@ -481,15 +559,19 @@ public class CustomGameTabsPlugin extends Plugin
         }
 
         final String key = event.getKey();
-        final Map<Integer, Point> positions = currentFreeformLocations();
-        final Point handle = drawerOverlay.getHandleLocation();
-        final Map<Integer, Point> dockSeed = "layoutMode".equals(key)
-            && config.layoutMode() == TabLayoutMode.FREEFORM
-            ? dockOverlay.captureButtonLocations()
-            : new LinkedHashMap<>();
-
         clientThread.invoke(() ->
         {
+            if (!running)
+            {
+                return;
+            }
+            final Map<Integer, Point> positions = currentFreeformLocations();
+            final Point handle = drawerOverlay.getHandleLocation();
+            final Map<Integer, Point> dockSeed = "layoutMode".equals(key)
+                && config.layoutMode() == TabLayoutMode.FREEFORM
+                ? dockOverlay.captureButtonLocations()
+                : new LinkedHashMap<>();
+
             nativeTabPresentation.update();
 
             if ("layoutMode".equals(key))
@@ -505,7 +587,6 @@ public class CustomGameTabsPlugin extends Plugin
             else
             {
                 revalidateOverlays();
-                updateSnapAvailability();
                 if (config.layoutMode() == TabLayoutMode.DOCKED)
                 {
                     positionDrawerForDock();
@@ -593,13 +674,9 @@ public class CustomGameTabsPlugin extends Plugin
                     config,
                     iconRenderer,
                     nativeTabController,
-                    snapManager,
                     tooltipPresenter,
                     tabIndex
                 );
-                /* CGT owns Freeform drop/snap in finishAltDrag(). Do not let
-                 * OverlayRenderer run a second, independent onDrag snap path. */
-                overlay.setCustomSnapEnabled(false);
                 looseOverlays.add(overlay);
                 overlayManager.add(overlay);
 
@@ -617,7 +694,6 @@ public class CustomGameTabsPlugin extends Plugin
             overlayManager.add(dockOverlay);
         }
 
-        drawerOverlay.setFreeformMovable(config.layoutMode() == TabLayoutMode.FREEFORM);
         drawerOverlay.setExpanded(drawerExpanded);
         overlayManager.add(drawerOverlay);
 
@@ -648,6 +724,9 @@ public class CustomGameTabsPlugin extends Plugin
 
     private void removeAllOverlays()
     {
+        inputGeneration++;
+        invalidateHitRegions();
+        resetAltDrag();
         overlayManager.remove(dockOverlay);
         overlayManager.remove(drawerOverlay);
         for (CustomGameTabOverlay overlay : looseOverlays)
@@ -683,6 +762,10 @@ public class CustomGameTabsPlugin extends Plugin
 
     private boolean ownsInputSurface(int x, int y)
     {
+        if (!running || !inputAvailable)
+        {
+            return false;
+        }
         for (Rectangle bounds : sidePanelBounds)
         {
             if (bounds.contains(x, y))
@@ -705,11 +788,18 @@ public class CustomGameTabsPlugin extends Plugin
     {
         if (client.getGameState() != GameState.LOGGED_IN)
         {
+            inputAvailable = false;
             sidePanelBounds = new Rectangle[0];
             return;
         }
 
         final LayoutSpec layout = LayoutSpec.forRoot(client.getTopLevelInterfaceId());
+        final boolean wasAvailable = inputAvailable;
+        inputAvailable = layout != null;
+        if (wasAvailable != inputAvailable)
+        {
+            refreshLayoutsPanel();
+        }
         sidePanelBounds = layout == null
             ? new Rectangle[0]
             : layout.captureSidePanelBounds(client);
@@ -777,7 +867,7 @@ public class CustomGameTabsPlugin extends Plugin
             {
                 placeDrawerHandle(dragStartDrawerHandle, false);
             }
-            log.info("[CGT 2.2.2] begin drawer drag handle={}", dragStartDrawerHandle);
+            log.debug("[CGT 2.2.2] begin drawer drag handle={}", dragStartDrawerHandle);
             return;
         }
 
@@ -811,7 +901,7 @@ public class CustomGameTabsPlugin extends Plugin
             final CustomGameTabOverlay overlay = overlayForTab(member);
             if (point != null && overlay != null)
             {
-                final Point canonical = clampTabLocation(point);
+                final Point canonical = new Point(point);
                 dragStartLocations.put(member, new Point(canonical));
                 canonicalizeOverlayForDrag(overlay, canonical);
             }
@@ -823,7 +913,7 @@ public class CustomGameTabsPlugin extends Plugin
             return;
         }
 
-        log.info(
+        log.debug(
             "[CGT 2.2.2] begin tab drag tab={} stick={} members={}",
             tab,
             config.stickTogether(),
@@ -901,7 +991,7 @@ public class CustomGameTabsPlugin extends Plugin
             {
                 final Point handle = clampHandle(new Point(drawerStart.x + dx, drawerStart.y + dy));
                 repositionFreeformDrawer(handle);
-                log.info("[CGT 2.2.2] finish drawer drag handle={}", handle);
+                log.debug("[CGT 2.2.2] finish drawer drag handle={}", handle);
                 saveWorkingSnapshot();
             }
             return;
@@ -939,7 +1029,7 @@ public class CustomGameTabsPlugin extends Plugin
                         starts
                     );
                     proposed = translatedLocations(starts, delta);
-                    log.info(
+                    log.debug(
                         "[CGT 2.2.2] snap tab={} target={} members={} desired={}",
                         tab,
                         snap.targetTab,
@@ -969,7 +1059,7 @@ public class CustomGameTabsPlugin extends Plugin
             )
             : new StickyGroups();
 
-        log.info(
+        log.debug(
             "[CGT 2.2.2] finish tab drag tab={} members={} delta={} groups={}",
             tab,
             starts.keySet(),
@@ -1057,16 +1147,6 @@ public class CustomGameTabsPlugin extends Plugin
         return null;
     }
 
-    private void updateSnapAvailability()
-    {
-        /* Freeform snap is handled once, by finishAltDrag(), so Snap Buttons and
-         * Stick Together can coexist without RuneLite's native drag path racing it. */
-        for (CustomGameTabOverlay overlay : looseOverlays)
-        {
-            overlay.setCustomSnapEnabled(false);
-        }
-    }
-
     private void toggleDrawer()
     {
         setDrawerExpanded(!drawerExpanded, true);
@@ -1089,7 +1169,7 @@ public class CustomGameTabsPlugin extends Plugin
             positionDrawerForDock();
         }
 
-        log.info("[CGT 2.2.2] drawer expanded={} handle={}", expanded, drawerOverlay.getHandleLocation());
+        log.debug("[CGT 2.2.2] drawer expanded={} handle={}", expanded, drawerOverlay.getHandleLocation());
 
         if (save)
         {
@@ -1364,6 +1444,11 @@ public class CustomGameTabsPlugin extends Plugin
         return config.layoutMode();
     }
 
+    boolean isLayoutAvailable()
+    {
+        return inputAvailable;
+    }
+
     int getButtonsPerRow()
     {
         return config.buttonsPerRow();
@@ -1511,8 +1596,12 @@ public class CustomGameTabsPlugin extends Plugin
 
     void setDrawerDirection(DrawerDirection direction)
     {
-        if (direction != null && direction != config.drawerDirection())
+        clientThread.invoke(() ->
         {
+            if (direction == null || direction == config.drawerDirection())
+            {
+                return;
+            }
             final Point handle = drawerOverlay.getHandleLocation();
             applyingActivityLayout = true;
             try
@@ -1523,21 +1612,17 @@ public class CustomGameTabsPlugin extends Plugin
             {
                 applyingActivityLayout = false;
             }
-
-            clientThread.invoke(() ->
+            if (config.layoutMode() == TabLayoutMode.FREEFORM)
             {
-                if (config.layoutMode() == TabLayoutMode.FREEFORM)
-                {
-                    repositionFreeformDrawer(handle);
-                }
-                else
-                {
-                    positionDrawerForDock();
-                }
-                saveWorkingSnapshot();
-                refreshLayoutsPanel();
-            });
-        }
+                repositionFreeformDrawer(handle);
+            }
+            else
+            {
+                positionDrawerForDock();
+            }
+            saveWorkingSnapshot();
+            refreshLayoutsPanel();
+        });
     }
 
     void setDrawerOpen(boolean open)
@@ -1579,8 +1664,7 @@ public class CustomGameTabsPlugin extends Plugin
                     DockMetrics.gap(config)
                 )
                 : new StickyGroups();
-            updateSnapAvailability();
-            log.info(
+            log.debug(
                 "[CGT 2.2.2] stickTogether={} groups={}",
                 stick,
                 stickyGroups.asLists()
@@ -1858,7 +1942,7 @@ public class CustomGameTabsPlugin extends Plugin
             ? working.getStickyGroups().retain(TabLayout.mainOrder(config))
             : new StickyGroups();
 
-        log.info(
+        log.debug(
             "[CGT 2.2.2] canvas resize {}x{} -> {}x{} groups={} positions={}",
             previousWidth,
             previousHeight,
@@ -1893,7 +1977,7 @@ public class CustomGameTabsPlugin extends Plugin
             && Math.abs(raw.y - 12) <= 4)
         {
             final Point migrated = defaultFreeformDrawerHandle(resolveLocations(snapshot));
-            log.info(
+            log.debug(
                 "[CGT 2.2.2] migrated legacy drawer handle {} -> {}",
                 raw,
                 migrated
@@ -1933,6 +2017,8 @@ public class CustomGameTabsPlugin extends Plugin
         overlayManager.resetOverlay(overlay);
         overlay.setPreferredPosition(null);
         overlay.setPreferredLocation(new Point(location));
+        overlay.getBounds().setLocation(location);
+        overlay.invalidateHitRegions();
         overlay.revalidate();
         overlayManager.saveOverlay(overlay);
     }
@@ -2096,7 +2182,12 @@ public class CustomGameTabsPlugin extends Plugin
 
     private void addLayoutsNavigation()
     {
-        if (layoutsNavigation != null)
+        if (!SwingUtilities.isEventDispatchThread())
+        {
+            SwingUtilities.invokeLater(this::addLayoutsNavigation);
+            return;
+        }
+        if (!running || layoutsNavigation != null)
         {
             return;
         }
@@ -2115,6 +2206,11 @@ public class CustomGameTabsPlugin extends Plugin
 
     private void removeLayoutsNavigation()
     {
+        if (!SwingUtilities.isEventDispatchThread())
+        {
+            SwingUtilities.invokeLater(this::removeLayoutsNavigation);
+            return;
+        }
         if (layoutsNavigation != null)
         {
             clientToolbar.removeNavigation(layoutsNavigation);

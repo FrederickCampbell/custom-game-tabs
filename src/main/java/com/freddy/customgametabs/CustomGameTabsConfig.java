@@ -130,7 +130,7 @@ public interface CustomGameTabsConfig extends Config
     @ConfigItem(
         keyName = "buttonScale",
         name = "Button Size",
-        description = "Type 25-200; arrows change by 1; subpixel rendering smooths nearby sizes",
+        description = "Type 25-200 percent; 100 is 42 logical pixels. Very small buttons are harder to select.",
         section = APPEARANCE_SECTION,
         position = 0
     )
@@ -143,7 +143,7 @@ public interface CustomGameTabsConfig extends Config
     @ConfigItem(
         keyName = "gap",
         name = "Button Spacing",
-        description = "Exact screen pixels between dock buttons, drawer buttons, and snapped freeform buttons",
+        description = "Logical game pixels (before Stretched Mode scaling) between dock buttons, drawer buttons, and snapped freeform buttons",
         section = APPEARANCE_SECTION,
         position = 1
     )
