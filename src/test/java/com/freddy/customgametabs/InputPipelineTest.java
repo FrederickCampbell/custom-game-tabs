@@ -290,6 +290,16 @@ public class InputPipelineTest
     }
 
     @Test
+    public void menuSortWithNoCanvasMousePositionLeavesMenusAlone()
+    {
+        start();
+        // Client menus may be sorted while the canvas cursor is unavailable.
+        plugin.onPostMenuSort(new net.runelite.api.events.PostMenuSort());
+        verifyNoInteractions(nativeTabMenuBridge);
+        plugin.shutDown();
+    }
+
+    @Test
     public void newlyOpenedInventoryPanelWinsBeforeTheNextClientTick()
     {
         start(); // The last tick had no native panel bounds.
