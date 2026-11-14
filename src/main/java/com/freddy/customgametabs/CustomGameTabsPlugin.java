@@ -505,6 +505,22 @@ public class CustomGameTabsPlugin extends Plugin
         }
 
         final net.runelite.api.Point mouse = client.getMouseCanvasPosition();
+        if (mouse == null)
+        {
+            return;
+        }
+
+        // PostMenuSort can run after the native side panel changes but before
+        // PostClientTick republishes the bounds used by AWT mouse callbacks.
+        // Read live widget geometry here on the client thread, so inventory
+        // actions are never replaced using a stale side-panel exclusion.
+        final LayoutSpec layout = LayoutSpec.forRoot(client.getTopLevelInterfaceId());
+        if (layout == null)
+        {
+            return;
+        }
+        sidePanelBounds = layout.captureSidePanelBounds(client);
+
         final int x = mouse.getX();
         final int y = mouse.getY();
         nativeTabMenuBridge.prepareMenu(tabAt(x, y), ownsInputSurface(x, y));
