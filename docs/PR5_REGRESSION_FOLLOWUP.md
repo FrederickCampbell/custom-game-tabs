@@ -14,6 +14,27 @@ The first live test exposed unreliable hovering/clicking, duplicate labels, and 
 
 Native side panels retain precedence because they draw over CGT. Consuming through them would be a new defect. The tooltip preference continues to control CGT's own fallback only; Mouse Highlight's independent preference is preserved. Unrelated third-party overlays that enqueue duplicate tooltips after this presenter are not universally controlled.
 
+## Combat Options / Sailing Reorderer live-test correction
+
+The live client now passes drawer clicks and Stretched Mode, but Mouse Highlight can
+show **Enable Sailing Panel Reorder** when hovering the Combat Options stone.
+This is a legitimate third-party menu supplied by Sailing Reorderer: that plugin
+registers widget menu options against Resizable Modern's `STONE0`. CGT's
+`NativeTabMenuBridge` deliberately replays `MenuEntryAdded` so those actions
+remain available. RuneLite's `MenuManager` inserts managed widget options at
+the high end of the menu, where Mouse Highlight reads the default entry.
+
+After replaying the managed options, CGT now moves the **existing native op-1
+entry for the exact source widget** to the high end. It leaves all other entries,
+identities, callbacks, and their relative order intact. This is not a
+Sailing-specific string filter and does not remove the reorder/reset options
+from right-click. Tests cover the primary op with added secondary options, wrong
+widget IDs, already-correct order, and absent native operations.
+
+This still needs one live retest: hover Combat Options should show its native
+label; right-click must still include Sailing Reorderer's Enable/Disable and Reset
+entries; ordinary clicks must keep opening the correct native tab.
+
 ## Regression coverage
 
 - Actual MouseManager + TranslateMouseListener, both enable orders and toggling, with an earlier ordinary consuming listener.
