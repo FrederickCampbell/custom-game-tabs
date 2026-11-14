@@ -290,6 +290,42 @@ public class InputPipelineTest
     }
 
     @Test
+    public void menuSortWithNoCanvasMousePositionLeavesMenusAlone()
+    {
+        start();
+        // Client menus may be sorted while the canvas cursor is unavailable.
+        plugin.onPostMenuSort(new net.runelite.api.events.PostMenuSort());
+        verifyNoInteractions(nativeTabMenuBridge);
+        plugin.shutDown();
+    }
+
+    @Test
+    public void newlyOpenedInventoryPanelWinsBeforeTheNextClientTick()
+    {
+        start(); // The last tick had no native panel bounds.
+
+        final net.runelite.api.widgets.Widget container = mock(net.runelite.api.widgets.Widget.class);
+        when(container.isHidden()).thenReturn(false);
+        when(container.getWidth()).thenReturn(250);
+        when(container.getHeight()).thenReturn(350);
+        when(container.getBounds()).thenReturn(new Rectangle(350, 250, 250, 350));
+        when(client.getWidget(InterfaceID.ToplevelPreEoc.SIDE_CONTAINER)).thenReturn(container);
+        when(client.getMouseCanvasPosition()).thenReturn(new net.runelite.api.Point(420, 320));
+
+        // This point is also inside the rendered docked tab: the current native
+        // inventory panel must take priority even before another PostClientTick.
+        plugin.onPostMenuSort(new net.runelite.api.events.PostMenuSort());
+        verify(nativeTabMenuBridge).prepareMenu(3, false);
+
+        // Once the native panel closes, the same custom tab regains its menu.
+        clearInvocations(nativeTabMenuBridge);
+        when(container.isHidden()).thenReturn(true);
+        plugin.onPostMenuSort(new net.runelite.api.events.PostMenuSort());
+        verify(nativeTabMenuBridge).prepareMenu(3, true);
+        plugin.shutDown();
+    }
+
+    @Test
     public void drawerHandleOccludesUnderlyingTabMenu()
     {
         start();
