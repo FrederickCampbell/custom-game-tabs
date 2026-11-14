@@ -75,7 +75,7 @@ public class CustomGameTabsPlugin extends Plugin
     private volatile boolean inputAvailable;
     private volatile long inputGeneration;
     private volatile long lifecycleGeneration;
-    private boolean dragCaptured;
+    private final InputGestureCapture gestureCapture = new InputGestureCapture();
 
     private volatile TabLayoutsPanel layoutsPanel;
     private volatile NavigationButton layoutsNavigation;
@@ -85,9 +85,6 @@ public class CustomGameTabsPlugin extends Plugin
     private int restoreWorkingCountdown;
     private int lastCanvasWidth = -1;
     private int lastCanvasHeight = -1;
-
-    private boolean leftGestureCaptured;
-    private boolean suppressNextLeftClick;
 
     /* Alt-drag bookkeeping. CGT owns the entire Freeform gesture so RuneLite's
      * generic overlay mover cannot independently re-anchor one stone or leak the
@@ -123,13 +120,13 @@ public class CustomGameTabsPlugin extends Plugin
                 return event;
             }
 
-            if (leftGestureCaptured)
+            if (gestureCapture.isTabPressCaptured())
             {
                 event.consume();
                 return event;
             }
 
-            if (dragCaptured)
+            if (gestureCapture.isAltDragCaptured())
             {
                 final int x = event.getX();
                 final int y = event.getY();
@@ -161,7 +158,7 @@ public class CustomGameTabsPlugin extends Plugin
             if (client.isMenuOpen())
             {
                 resetClickGesture();
-                dragCaptured = false;
+                gestureCapture.stopAltDrag();
                 queueInput(CustomGameTabsPlugin.this::resetAltDrag);
                 return event;
             }
@@ -170,17 +167,20 @@ public class CustomGameTabsPlugin extends Plugin
             {
                 final int x = event.getX();
                 final int y = event.getY();
-                dragCaptured = config.layoutMode() == TabLayoutMode.FREEFORM && ownsInputSurface(x, y);
-                if (dragCaptured)
+                if (config.layoutMode() == TabLayoutMode.FREEFORM && ownsInputSurface(x, y))
                 {
+                    gestureCapture.captureAltDrag();
                     queueInput(() -> beginAltDrag(x, y));
-                    suppressNextLeftClick = true;
                     event.consume();
+                }
+                else
+                {
+                    gestureCapture.stopAltDrag();
                 }
                 return event;
             }
 
-            dragCaptured = false;
+            gestureCapture.stopAltDrag();
             queueInput(CustomGameTabsPlugin.this::resetAltDrag);
             final int x = event.getX();
             final int y = event.getY();
@@ -189,8 +189,7 @@ public class CustomGameTabsPlugin extends Plugin
                 return event;
             }
 
-            leftGestureCaptured = true;
-            suppressNextLeftClick = true;
+            gestureCapture.captureTabPress();
             event.consume();
 
             if (drawerOverlay.handleContains(x, y))
@@ -218,7 +217,7 @@ public class CustomGameTabsPlugin extends Plugin
         @Override
         public MouseEvent mouseReleased(MouseEvent event)
         {
-            if (dragCaptured)
+            if (gestureCapture.isAltDragCaptured())
             {
                 if (!SwingUtilities.isLeftMouseButton(event))
                 {
@@ -226,7 +225,7 @@ public class CustomGameTabsPlugin extends Plugin
                 }
                 final int endX = event.getX();
                 final int endY = event.getY();
-                dragCaptured = false;
+                gestureCapture.stopAltDrag();
                 queueInput(() ->
                 {
                     if (altDragGesture)
@@ -242,13 +241,12 @@ public class CustomGameTabsPlugin extends Plugin
 
             if (client.isMenuOpen())
             {
-                leftGestureCaptured = false;
+                gestureCapture.releaseTabPress();
                 return event;
             }
 
-            if (leftGestureCaptured && SwingUtilities.isLeftMouseButton(event))
+            if (SwingUtilities.isLeftMouseButton(event) && gestureCapture.releaseTabPress())
             {
-                leftGestureCaptured = false;
                 event.consume();
             }
             return event;
@@ -259,13 +257,12 @@ public class CustomGameTabsPlugin extends Plugin
         {
             if (client.isMenuOpen())
             {
-                suppressNextLeftClick = false;
+                gestureCapture.clearPendingLeftClick();
                 return event;
             }
 
-            if (suppressNextLeftClick && SwingUtilities.isLeftMouseButton(event))
+            if (SwingUtilities.isLeftMouseButton(event) && gestureCapture.consumePendingLeftClick())
             {
-                suppressNextLeftClick = false;
                 event.consume();
             }
             return event;
@@ -347,7 +344,7 @@ public class CustomGameTabsPlugin extends Plugin
         tooltipPresenter.setTextSupplier(() -> null);
         overlayManager.remove(tooltipPresenter);
         resetClickGesture();
-        dragCaptured = false;
+        gestureCapture.stopAltDrag();
         sidePanelBounds = new Rectangle[0];
         removeLayoutsNavigation();
         clientThread.invoke(() ->
@@ -1208,8 +1205,7 @@ public class CustomGameTabsPlugin extends Plugin
 
     private void resetClickGesture()
     {
-        leftGestureCaptured = false;
-        suppressNextLeftClick = false;
+        gestureCapture.resetClickGesture();
     }
 
     private CustomGameTabOverlay overlayForTab(int tabIndex)
