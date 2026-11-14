@@ -84,7 +84,9 @@ public class TabMouseInputListenerTest
             0, MouseEvent.BUTTON1)).isConsumed());
         assertFalse(listener.mouseClicked(mouse(MouseEvent.MOUSE_CLICKED, 110, 120,
             0, MouseEvent.BUTTON1)).isConsumed());
-        verify(target).cancelAltDrag();
+        // The first ordinary press and the later menu-open press each cancel
+        // any pending client-thread Alt-drag state, matching the old adapter.
+        verify(target, times(2)).cancelAltDrag();
     }
 
     @Test
