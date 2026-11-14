@@ -39,6 +39,7 @@ public class InputPipelineTest
     @Mock private ClientThread clientThread;
     @Mock private OverlayManager overlayManager;
     @Mock private ClientToolbar clientToolbar;
+    @Mock private net.runelite.client.ui.DrawManager drawManager;
     @Mock private ConfigManager configManager;
     @Mock private TabIconRenderer iconRenderer;
     @Mock private TabSnapManager snapManager;
@@ -64,6 +65,7 @@ public class InputPipelineTest
     @Before
     public void setup()
     {
+        mouseManager.registerMouseListener(new net.runelite.client.input.MouseAdapter() {}); // core listener slot
         when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
         when(client.getTopLevelInterfaceId()).thenReturn(InterfaceID.TOPLEVEL_PRE_EOC);
         when(client.getRealDimensions()).thenReturn(new Dimension(800, 600));
@@ -131,7 +133,7 @@ public class InputPipelineTest
         MouseEvent event = press(420, 320);
         assertTrue(mouseManager.processMousePressed(event).isConsumed());
         plugin.onBeforeRender(new BeforeRender());
-        verify(dockOverlay, atLeastOnce()).invalidateHitRegions();
+        verify(dockOverlay).beginFrame();
         plugin.shutDown();
         drain();
         verify(nativeTabController, never()).activateTab(anyInt());
@@ -208,6 +210,94 @@ public class InputPipelineTest
         verify(activityLayoutStore, atLeastOnce()).saveWorking(saved.capture());
         assertEquals(new java.awt.Point(140, 140), saved.getValue().resolveLocations(800, 600, 42).get(0));
         verify(nativeTabController, never()).activateTab(anyInt());
+        plugin.shutDown();
+    }
+
+    @Test
+    public void ordinaryCompetingListenerCannotStealCustomClicksInEitherStartupOrder()
+    {
+        final int[] stolen = {0};
+        net.runelite.client.input.MouseAdapter competitor = new net.runelite.client.input.MouseAdapter()
+        {
+            @Override public MouseEvent mousePressed(MouseEvent event)
+            {
+                stolen[0]++;
+                event.consume();
+                return event;
+            }
+        };
+        mouseManager.registerMouseListener(competitor);
+        TranslateMouseListener translator = new TranslateMouseListener(client);
+        mouseManager.registerMouseListener(0, translator);
+        start();
+        assertClick(630, 480, true);
+        assertEquals(0, stolen[0]);
+        mouseManager.unregisterMouseListener(translator);
+        assertClick(420, 320, true);
+        mouseManager.registerMouseListener(0, translator);
+        assertClick(630, 480, true);
+        plugin.shutDown();
+        mouseManager.unregisterMouseListener(translator);
+        start();
+        assertClick(420, 320, true);
+        mouseManager.registerMouseListener(0, translator);
+        assertClick(630, 480, true);
+        assertEquals(0, stolen[0]);
+        plugin.shutDown();
+    }
+
+    @Test
+    public void drawerTogglesAtStationaryCursorIncludingClicksBetweenFrameStartAndRender() throws Exception
+    {
+        doReturn(TabLayoutMode.FREEFORM).when(config).layoutMode();
+        doReturn("0,1,2,3,4,5,6,7,8,9,10,11,12,13").when(config).drawerTabs();
+        DrawerOverlay realDrawer = new DrawerOverlay(client, config, iconRenderer, nativeTabController);
+        java.lang.reflect.Field field = CustomGameTabsPlugin.class.getDeclaredField("drawerOverlay");
+        field.setAccessible(true);
+        field.set(plugin, realDrawer);
+        start();
+        org.mockito.ArgumentCaptor<Runnable> callback = org.mockito.ArgumentCaptor.forClass(Runnable.class);
+        verify(drawManager).registerEveryFrameListener(callback.capture());
+        java.awt.Graphics2D graphics = new java.awt.image.BufferedImage(800, 600,
+            java.awt.image.BufferedImage.TYPE_INT_ARGB).createGraphics();
+        try
+        {
+            realDrawer.getBounds().setLocation(realDrawer.getPreferredLocation());
+            realDrawer.render(graphics);
+            callback.getValue().run();
+            java.awt.Point handle = realDrawer.getHandleLocation();
+            for (int click = 0; click < 6; click++)
+            {
+                plugin.onBeforeRender(new BeforeRender());
+                assertTrue(realDrawer.handleContains(handle.x + 10, handle.y + 10));
+                assertTrue(mouseManager.processMousePressed(press(handle.x + 10, handle.y + 10)).isConsumed());
+                drain();
+                assertEquals(click % 2 == 0, realDrawer.isExpanded());
+                mouseManager.processMouseReleased(new MouseEvent(new Canvas(), MouseEvent.MOUSE_RELEASED,
+                    0, 0, handle.x + 10, handle.y + 10, 1, false, MouseEvent.BUTTON1));
+                realDrawer.getBounds().setLocation(realDrawer.getPreferredLocation());
+                realDrawer.render(graphics);
+                callback.getValue().run();
+                assertEquals(handle, realDrawer.getHandleLocation());
+            }
+            plugin.onBeforeRender(new BeforeRender());
+            assertTrue(realDrawer.handleContains(handle.x + 10, handle.y + 10));
+            callback.getValue().run(); // manual layer omitted this completed frame
+            assertFalse(realDrawer.handleContains(handle.x + 10, handle.y + 10));
+        }
+        finally { graphics.dispose(); plugin.shutDown(); }
+        verify(drawManager).unregisterEveryFrameListener(callback.getValue());
+    }
+
+    @Test
+    public void drawerHandleOccludesUnderlyingTabMenu()
+    {
+        start();
+        when(drawerOverlay.containsInputSurface(420, 320)).thenReturn(true);
+        when(drawerOverlay.handleContains(420, 320)).thenReturn(true);
+        when(client.getMouseCanvasPosition()).thenReturn(new net.runelite.api.Point(420, 320));
+        plugin.onPostMenuSort(new net.runelite.api.events.PostMenuSort());
+        verify(nativeTabMenuBridge).prepareMenu(-1, true);
         plugin.shutDown();
     }
 

@@ -35,6 +35,7 @@ import net.runelite.client.input.MouseManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
+import net.runelite.client.ui.DrawManager;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
 import org.slf4j.Logger;
@@ -59,6 +60,8 @@ public class CustomGameTabsPlugin extends Plugin
     @Inject private TabIconRenderer iconRenderer;
     @Inject private TabSnapManager snapManager;
     @Inject private TabTooltipPresenter tooltipPresenter;
+    @Inject private DrawManager drawManager;
+    private final Runnable drawComplete = this::completeFrame;
     @Inject private ActivityLayoutStore activityLayoutStore;
     @Inject private NativeTabController nativeTabController;
     @Inject private CustomGameTabsOverlay dockOverlay;
@@ -295,9 +298,12 @@ public class CustomGameTabsPlugin extends Plugin
             applyingActivityLayout = false;
         }
         nativeTabController.startUp();
-        // Append after RuneLite's coordinate translator, independent of plugin startup order.
-        // Freeform overlays are non-movable to the generic mover; CGT owns their gestures.
-        mouseManager.registerMouseListener(mouseAdapter);
+        // Reserve the first slot for RuneLite's translator (or its core overlay
+        // listener when stretching is disabled), ahead of ordinary plugin listeners.
+        mouseManager.registerMouseListener(1, mouseAdapter);
+        drawManager.registerEveryFrameListener(drawComplete);
+        tooltipPresenter.setTextSupplier(this::hoveredTooltip);
+        overlayManager.add(tooltipPresenter);
 
         final Dimension startupDimensions = client.getRealDimensions();
         lastCanvasWidth = startupDimensions.width;
@@ -337,6 +343,9 @@ public class CustomGameTabsPlugin extends Plugin
         inputAvailable = false;
         inputGeneration++;
         mouseManager.unregisterMouseListener(mouseAdapter);
+        drawManager.unregisterEveryFrameListener(drawComplete);
+        tooltipPresenter.setTextSupplier(() -> null);
+        overlayManager.remove(tooltipPresenter);
         resetClickGesture();
         dragCaptured = false;
         sidePanelBounds = new Rectangle[0];
@@ -371,9 +380,62 @@ public class CustomGameTabsPlugin extends Plugin
     @Subscribe
     public void onBeforeRender(BeforeRender event)
     {
-        // MANUAL overlays are not called at all when their layer disappears.
-        // A hit region must be republished by a successful render this frame.
-        invalidateHitRegions();
+        // Retain the last visible targets while the next frame is prepared.
+        dockOverlay.beginFrame();
+        drawerOverlay.beginFrame();
+        for (CustomGameTabOverlay overlay : looseOverlays)
+        {
+            overlay.beginFrame();
+        }
+        final net.runelite.api.Point mouse = client.getMouseCanvasPosition();
+        if (mouse != null && !client.isMenuOpen())
+        {
+            updateHover(mouse.getX(), mouse.getY());
+        }
+    }
+
+    private void completeFrame()
+    {
+        // DrawManager runs after presentation in both software and GPU rendering.
+        dockOverlay.completeFrame();
+        drawerOverlay.completeFrame();
+        for (CustomGameTabOverlay overlay : looseOverlays)
+        {
+            overlay.completeFrame();
+        }
+    }
+
+    private String hoveredTooltip()
+    {
+        final net.runelite.api.Point mouse = client.getMouseCanvasPosition();
+        if (!config.showTooltip() || mouse == null || !ownsInputSurface(mouse.getX(), mouse.getY()))
+        {
+            return null;
+        }
+        final int x = mouse.getX();
+        final int y = mouse.getY();
+        int tab = -1;
+        if (drawerOverlay.wasRenderedThisFrame() && drawerOverlay.containsInputSurface(x, y))
+        {
+            tab = drawerOverlay.tabAt(x, y);
+        }
+        else if (config.layoutMode() == TabLayoutMode.DOCKED && dockOverlay.wasRenderedThisFrame())
+        {
+            tab = dockOverlay.tabAt(x, y);
+        }
+        else if (config.layoutMode() == TabLayoutMode.FREEFORM)
+        {
+            for (int i = looseOverlays.size() - 1; i >= 0; i--)
+            {
+                CustomGameTabOverlay overlay = looseOverlays.get(i);
+                if (overlay.wasRenderedThisFrame() && overlay.contains(x, y))
+                {
+                    tab = overlay.getTabIndex();
+                    break;
+                }
+            }
+        }
+        return tab < 0 ? null : nativeTabController.getTabName(tab);
     }
 
     private void invalidateHitRegions()
@@ -674,7 +736,6 @@ public class CustomGameTabsPlugin extends Plugin
                     config,
                     iconRenderer,
                     nativeTabController,
-                    tooltipPresenter,
                     tabIndex
                 );
                 looseOverlays.add(overlay);
@@ -738,10 +799,10 @@ public class CustomGameTabsPlugin extends Plugin
 
     private int tabAt(int x, int y)
     {
-        final int drawerTab = drawerOverlay.tabAt(x, y);
-        if (drawerTab >= 0)
+        if (drawerOverlay.containsInputSurface(x, y))
         {
-            return drawerTab;
+            // The handle also occludes tabs below it; never project their menus.
+            return drawerOverlay.tabAt(x, y);
         }
 
         if (config.layoutMode() == TabLayoutMode.DOCKED)
@@ -1233,121 +1294,18 @@ public class CustomGameTabsPlugin extends Plugin
 
         final int cell = DockMetrics.buttonCellSize(config);
         final int gap = DockMetrics.gap(config);
-        final Point handle;
-        switch (direction)
-        {
-            case RIGHT:
-                handle = new Point(dock.x + dock.width + gap, dock.y);
-                break;
-            case UP:
-                handle = new Point(dock.x, dock.y - cell - gap);
-                break;
-            case DOWN:
-                handle = new Point(dock.x, dock.y + dock.height + gap);
-                break;
-            case LEFT:
-            default:
-                handle = new Point(dock.x - cell - gap, dock.y);
-                break;
-        }
+        final Point handle = DrawerPlacement.handle(direction, dock, cell, gap);
 
         placeDrawerHandle(clampHandle(handle), false);
     }
 
     private DrawerDirection resolveDrawerDirection(Point handle, Rectangle dock)
     {
-        final DrawerDirection requested = config.drawerDirection();
-        final Dimension canvas = client.getRealDimensions();
-        final int cell = DockMetrics.buttonCellSize(config);
-        final int count = TabLayout.drawerOrder(config).size();
-        final int needed = count * (cell + DockMetrics.gap(config));
-
-        final int left;
-        final int right;
-        final int up;
-        final int down;
-
-        if (dock != null)
-        {
-            left = Math.max(0, dock.x - cell);
-            right = Math.max(0, canvas.width - (dock.x + dock.width) - cell);
-            up = Math.max(0, dock.y - cell);
-            down = Math.max(0, canvas.height - (dock.y + dock.height) - cell);
-        }
-        else
-        {
-            final Point h = handle == null ? defaultFreeformDrawerHandle(currentFreeformLocations()) : handle;
-            left = Math.max(0, h.x);
-            right = Math.max(0, canvas.width - (h.x + cell));
-            up = Math.max(0, h.y);
-            down = Math.max(0, canvas.height - (h.y + cell));
-        }
-
-        if (requested != DrawerDirection.AUTO)
-        {
-            if (spaceFor(requested, left, right, up, down) >= needed)
-            {
-                return requested;
-            }
-            final DrawerDirection opposite = opposite(requested);
-            if (spaceFor(opposite, left, right, up, down) >= needed)
-            {
-                return opposite;
-            }
-            return maxSpaceDirection(left, right, up, down);
-        }
-
-        if (dock != null)
-        {
-            final boolean vertical = dock.height >= dock.width;
-            if (vertical)
-            {
-                if (Math.max(left, right) >= needed)
-                {
-                    return left >= right ? DrawerDirection.LEFT : DrawerDirection.RIGHT;
-                }
-            }
-            else if (Math.max(up, down) >= needed)
-            {
-                return up >= down ? DrawerDirection.UP : DrawerDirection.DOWN;
-            }
-        }
-
-        return maxSpaceDirection(left, right, up, down);
-    }
-
-    private static int spaceFor(DrawerDirection direction, int left, int right, int up, int down)
-    {
-        switch (direction)
-        {
-            case RIGHT: return right;
-            case UP: return up;
-            case DOWN: return down;
-            case LEFT:
-            default: return left;
-        }
-    }
-
-    private static DrawerDirection opposite(DrawerDirection direction)
-    {
-        switch (direction)
-        {
-            case LEFT: return DrawerDirection.RIGHT;
-            case RIGHT: return DrawerDirection.LEFT;
-            case UP: return DrawerDirection.DOWN;
-            case DOWN: return DrawerDirection.UP;
-            default: return DrawerDirection.LEFT;
-        }
-    }
-
-    private static DrawerDirection maxSpaceDirection(int left, int right, int up, int down)
-    {
-        int best = left;
-        DrawerDirection direction = DrawerDirection.LEFT;
-        if (right > best) { best = right; direction = DrawerDirection.RIGHT; }
-        if (up > best) { best = up; direction = DrawerDirection.UP; }
-        if (down > best) { direction = DrawerDirection.DOWN; }
-        return direction;
+        final Point anchor = handle == null && dock == null
+            ? defaultFreeformDrawerHandle(currentFreeformLocations()) : handle;
+        return DrawerPlacement.choose(config.drawerDirection(), anchor, dock,
+            TabLayout.drawerOrder(config).size(), DockMetrics.buttonCellSize(config),
+            DockMetrics.gap(config), client.getRealDimensions());
     }
 
     private void placeDrawerHandle(Point handle, boolean persist)

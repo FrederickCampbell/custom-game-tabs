@@ -22,18 +22,17 @@ final class CustomGameTabOverlay extends Overlay
     private final CustomGameTabsConfig config;
     private final TabIconRenderer iconRenderer;
     private final NativeTabController nativeTabController;
-    private final TabTooltipPresenter tooltipPresenter;
     private final int tabIndex;
 
     private volatile boolean hovered;
     private volatile TabHitRegions hitRegions = TabHitRegions.EMPTY;
+    private boolean renderedThisFrame;
 
     CustomGameTabOverlay(
         Client client,
         CustomGameTabsConfig config,
         TabIconRenderer iconRenderer,
         NativeTabController nativeTabController,
-        TabTooltipPresenter tooltipPresenter,
         int tabIndex
     )
     {
@@ -41,7 +40,6 @@ final class CustomGameTabOverlay extends Overlay
         this.config = config;
         this.iconRenderer = iconRenderer;
         this.nativeTabController = nativeTabController;
-        this.tooltipPresenter = tooltipPresenter;
         this.tabIndex = tabIndex;
 
         setPosition(OverlayPosition.TOP_RIGHT);
@@ -142,13 +140,8 @@ final class CustomGameTabOverlay extends Overlay
             opacity
         );
 
-        if (config.showTooltip() && hovered)
-        {
-            tooltipPresenter.showIfAvailable(
-                nativeTabController.getTabName(tabIndex)
-            );
-        }
 
+        renderedThisFrame = true;
         hitRegions = new TabHitRegions(null, null, Collections.singletonMap(
             tabIndex, new Rectangle(getBounds().x, getBounds().y, cellSize, cellSize)));
         return new Dimension(cellSize, cellSize);
@@ -164,13 +157,33 @@ final class CustomGameTabOverlay extends Overlay
         return hitRegions.contains(x, y);
     }
 
+    boolean wasRenderedThisFrame()
+    {
+        return renderedThisFrame;
+    }
+
+    void beginFrame()
+    {
+        renderedThisFrame = false;
+    }
+
+    void completeFrame()
+    {
+        if (!renderedThisFrame)
+        {
+            invalidateHitRegions();
+        }
+    }
+
     void invalidateHitRegions()
     {
+        renderedThisFrame = false;
         hitRegions = TabHitRegions.EMPTY;
     }
 
     void clearBounds()
     {
+        renderedThisFrame = false;
         hitRegions = TabHitRegions.EMPTY;
         hovered = false;
     }

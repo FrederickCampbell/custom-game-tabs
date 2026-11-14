@@ -2,6 +2,8 @@
 
 Run the development client with `./gradlew run` using Java 11. For a Jagex account, follow [Using Jagex Accounts](https://github.com/runelite/runelite/wiki/Using-Jagex-Accounts). Only the user should operate the game. Record RuneLite version, OS/display scale, game layout, enabled plugins and exact steps for a failure. Keep your current settings/profile backed up before testing migration or reset behavior.
 
+Start with the [PR #5 regression retest](PR5_REGRESSION_FOLLOWUP.md#manual-retest): stationary drawer clicks, tooltip duplication and compact sidebar density were missed in the original acceptance run.
+
 ## Required golden path
 
 1. Use Resizable Modern. Enable CGT with Stretched already enabled. Click every Main tab and every Drawer tab, including Combat Options and Magic. The visible button alone must respond; former unscaled locations must behave as normal game space. Confirm Combat opens combat settings, not sailing reorder.

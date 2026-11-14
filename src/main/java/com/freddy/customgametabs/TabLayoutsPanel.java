@@ -180,18 +180,20 @@ final class TabLayoutsPanel extends PluginPanel
             final JPanel row = rowPanel();
             final JLabel label = new JLabel(LayoutSpec.TABS[tab].getName());
             label.setForeground(Color.WHITE);
-            row.add(label, BorderLayout.NORTH);
-            row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 56));
-            row.setBorder(new EmptyBorder(3, 0, 3, 0));
+            label.setToolTipText(LayoutSpec.TABS[tab].getName());
+            label.setMinimumSize(new Dimension(0, 26));
+            row.add(label, BorderLayout.CENTER);
+            row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+            row.setBorder(new EmptyBorder(1, 0, 1, 0));
 
-            final JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 3, 2));
+            final JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 1, 0));
             actions.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
             final JComboBox<TabState> state = new JComboBox<>(TabState.values());
             state.setSelectedItem(plugin.getTabState(tab));
             identify(state, "state-" + tab, LayoutSpec.TABS[tab].getName() + " placement");
             label.setLabelFor(state);
-            state.setPreferredSize(new Dimension(104, 26));
+            state.setPreferredSize(new Dimension(76, 26));
             state.addActionListener(e ->
             {
                 if (!refreshing)
@@ -216,7 +218,7 @@ final class TabLayoutsPanel extends PluginPanel
             actions.add(state);
             actions.add(up);
             actions.add(down);
-            row.add(actions, BorderLayout.CENTER);
+            row.add(actions, BorderLayout.EAST);
             add(row);
             add(Box.createRigidArea(new Dimension(0, 2)));
         }

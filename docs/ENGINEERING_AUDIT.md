@@ -2,6 +2,8 @@
 
 Audit date: 14 November 2026. Baseline: `f7c861fe0a19995d401cabb3361a4812ed43a88d` (2.2.2). Implementation: branch `audit/input-lifecycle-polish`.
 
+**Live-test correction:** the initial implementation below exposed input-timing, tooltip-ordering and sidebar-density regressions. See [PR #5 regression follow-up](PR5_REGRESSION_FOLLOWUP.md) for the corrected design and additional tests. The original 52-test result is historical, not live acceptance.
+
 ## Scope and confidence
 
 Reviewed all 23 production Java files (7,293 baseline lines), configuration, build and packaging, resources, existing tests, README, changelog, and repository instructions. Retrieved the complete public issue collection: four open issues, no closed issues, one issue comment, and no repository pull requests. Reviewed the Plugin Hub submission/update discussions (#14531, #15371, #16613), current RuneLite input/overlay/widget APIs, Compact Orbs, and Interface Layout. Public searches did not uncover additional attributable feedback. Private communities and unreported installations are outside this evidence.

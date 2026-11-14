@@ -20,7 +20,7 @@ public class OverlayHitLifecycleTest
             @Override public TabLayoutMode layoutMode() { return TabLayoutMode.FREEFORM; }
         };
         CustomGameTabOverlay overlay = new CustomGameTabOverlay(client, config,
-            mock(TabIconRenderer.class), mock(NativeTabController.class), mock(TabTooltipPresenter.class), 3);
+            mock(TabIconRenderer.class), mock(NativeTabController.class), 3);
         assertFalse(overlay.isMovable());
         overlay.getBounds().setLocation(100, 100);
         Graphics2D graphics = graphics();
@@ -50,9 +50,9 @@ public class OverlayHitLifecycleTest
             @Override public String drawerTabs() { return "3"; }
         };
         CustomGameTabsOverlay dock = new CustomGameTabsOverlay(client, config,
-            mock(TabIconRenderer.class), mock(NativeTabController.class), mock(TabTooltipPresenter.class));
+            mock(TabIconRenderer.class), mock(NativeTabController.class));
         DrawerOverlay drawer = new DrawerOverlay(client, config,
-            mock(TabIconRenderer.class), mock(NativeTabController.class), mock(TabTooltipPresenter.class));
+            mock(TabIconRenderer.class), mock(NativeTabController.class));
         dock.getBounds().setLocation(100, 100);
         drawer.getBounds().setLocation(300, 100);
         Graphics2D graphics = graphics();
@@ -63,8 +63,17 @@ public class OverlayHitLifecycleTest
             assertEquals(0, dock.tabAt(110, 110));
             assertTrue(drawer.handleContains(350, 110));
             assertFalse(drawer.containsInputSurface(310, 110)); // closed drawer's transparent extent
-            dock.invalidateHitRegions();
-            drawer.invalidateHitRegions();
+            dock.beginFrame();
+            drawer.beginFrame();
+            assertEquals(0, dock.tabAt(110, 110));
+            assertTrue(drawer.handleContains(350, 110));
+            dock.render(graphics);
+            dock.completeFrame();
+            drawer.completeFrame(); // omitted drawer expires only after presentation
+            assertEquals(0, dock.tabAt(110, 110));
+            assertFalse(drawer.handleContains(350, 110));
+            dock.beginFrame();
+            dock.completeFrame();
             assertEquals(-1, dock.tabAt(110, 110));
             assertFalse(drawer.handleContains(350, 110));
         }

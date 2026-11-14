@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Follow up on live-test regressions: retain hitboxes until a replacement frame completes, put CGT input ahead of ordinary plugin consumers while preserving translation, arbitrate tooltips after Mouse Highlight, restore compact sidebar rows, and use wrapped geometry for drawer direction selection.
 - Fix Stretched Mode listener ordering and invalidate hit regions when overlays are not drawn.
 - Serialize freeform gestures on the client thread and cancel stale queued input during lifecycle transitions.
 - Make drawer animation target changes idempotent and hit testing follow paint order.

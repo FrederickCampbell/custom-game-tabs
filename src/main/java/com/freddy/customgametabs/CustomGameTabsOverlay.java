@@ -30,8 +30,8 @@ final class CustomGameTabsOverlay extends Overlay
     private final CustomGameTabsConfig config;
     private final TabIconRenderer iconRenderer;
     private final NativeTabController nativeTabController;
-    private final TabTooltipPresenter tooltipPresenter;
     private volatile TabHitRegions hitRegions = TabHitRegions.EMPTY;
+    private boolean renderedThisFrame;
 
     private volatile int hoveredTab = -1;
 
@@ -40,15 +40,13 @@ final class CustomGameTabsOverlay extends Overlay
         Client client,
         CustomGameTabsConfig config,
         TabIconRenderer iconRenderer,
-        NativeTabController nativeTabController,
-        TabTooltipPresenter tooltipPresenter
+        NativeTabController nativeTabController
     )
     {
         this.client = client;
         this.config = config;
         this.iconRenderer = iconRenderer;
         this.nativeTabController = nativeTabController;
-        this.tooltipPresenter = tooltipPresenter;
 
         setPosition(OverlayPosition.TOP_RIGHT);
         setLayer(OverlayLayer.MANUAL);
@@ -167,17 +165,7 @@ final class CustomGameTabsOverlay extends Overlay
             );
         }
 
-        if (
-            config.showTooltip()
-                && hoveredTab >= 0
-                && hoveredTab < LayoutSpec.TABS.length
-        )
-        {
-            tooltipPresenter.showIfAvailable(
-                nativeTabController.getTabName(hoveredTab)
-            );
-        }
-
+        renderedThisFrame = true;
         hitRegions = new TabHitRegions(
             config.frameOpacity() > 0 ? new Rectangle2D.Double(
                 getBounds().x, getBounds().y, totalWidth, totalHeight) : null,
@@ -416,13 +404,33 @@ final class CustomGameTabsOverlay extends Overlay
         return Math.max(0, Math.min(100, percent));
     }
 
+    boolean wasRenderedThisFrame()
+    {
+        return renderedThisFrame;
+    }
+
+    void beginFrame()
+    {
+        renderedThisFrame = false;
+    }
+
+    void completeFrame()
+    {
+        if (!renderedThisFrame)
+        {
+            invalidateHitRegions();
+        }
+    }
+
     void invalidateHitRegions()
     {
+        renderedThisFrame = false;
         hitRegions = TabHitRegions.EMPTY;
     }
 
     void clearBounds()
     {
+        renderedThisFrame = false;
         hitRegions = TabHitRegions.EMPTY;
         hoveredTab = -1;
     }

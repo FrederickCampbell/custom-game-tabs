@@ -43,6 +43,7 @@ public class TabLayoutsPanelTest
                 Component down = find(panel, "down-" + tab);
                 assertTrue(down.getX() + down.getWidth() <= down.getParent().getWidth());
                 assertTrue(down.getHeight() >= 24);
+                assertTrue("Each tab row must stay compact", down.getParent().getParent().getHeight() <= 32);
             }
             BufferedImage image = new BufferedImage(panel.getWidth(), panel.getHeight(), BufferedImage.TYPE_INT_ARGB);
             Graphics2D graphics = image.createGraphics();

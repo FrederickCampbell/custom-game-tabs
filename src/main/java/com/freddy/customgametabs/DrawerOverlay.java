@@ -33,9 +33,9 @@ final class DrawerOverlay extends Overlay
     private final CustomGameTabsConfig config;
     private final TabIconRenderer iconRenderer;
     private final NativeTabController nativeTabController;
-    private final TabTooltipPresenter tooltipPresenter;
 
     private volatile TabHitRegions hitRegions = TabHitRegions.EMPTY;
+    private boolean renderedThisFrame;
     private volatile boolean expanded;
     private volatile DrawerDirection effectiveDirection = DrawerDirection.LEFT;
     private volatile int hoveredTab = -1;
@@ -46,15 +46,13 @@ final class DrawerOverlay extends Overlay
         Client client,
         CustomGameTabsConfig config,
         TabIconRenderer iconRenderer,
-        NativeTabController nativeTabController,
-        TabTooltipPresenter tooltipPresenter
+        NativeTabController nativeTabController
     )
     {
         this.client = client;
         this.config = config;
         this.iconRenderer = iconRenderer;
         this.nativeTabController = nativeTabController;
-        this.tooltipPresenter = tooltipPresenter;
 
         setPosition(OverlayPosition.TOP_RIGHT);
         setLayer(OverlayLayer.MANUAL);
@@ -163,13 +161,10 @@ final class DrawerOverlay extends Overlay
             }
         }
 
-        if (config.showTooltip() && hoveredTab >= 0)
-        {
-            tooltipPresenter.showIfAvailable(nativeTabController.getTabName(hoveredTab));
-        }
 
         // Paint the handle last so its click target matches the visible top layer.
         drawHandle(graphics, localHandle, radius);
+        renderedThisFrame = true;
         hitRegions = new TabHitRegions(null, handleBounds, buttonBounds);
         return new Dimension(Math.max(1, totalWidth), Math.max(1, totalHeight));
     }
@@ -409,13 +404,33 @@ final class DrawerOverlay extends Overlay
         return new Color(color.getRed(), color.getGreen(), color.getBlue(), Math.max(0, Math.min(255, alpha)));
     }
 
+    boolean wasRenderedThisFrame()
+    {
+        return renderedThisFrame;
+    }
+
+    void beginFrame()
+    {
+        renderedThisFrame = false;
+    }
+
+    void completeFrame()
+    {
+        if (!renderedThisFrame)
+        {
+            invalidateHitRegions();
+        }
+    }
+
     void invalidateHitRegions()
     {
+        renderedThisFrame = false;
         hitRegions = TabHitRegions.EMPTY;
     }
 
     void clearBounds()
     {
+        renderedThisFrame = false;
         hitRegions = TabHitRegions.EMPTY;
         hoveredTab = -1;
         hoveredHandle = false;
