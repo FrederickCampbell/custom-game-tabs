@@ -55,31 +55,6 @@ public class FreeformPlacementContractTest
     }
 
     @Test
-    public void cgtOwnsAltDragBeforeRuneLiteOverlayRenderer() throws IOException
-    {
-        final String source = Files.readString(
-            Path.of(
-                "src", "main", "java", "com", "freddy", "customgametabs",
-                "CustomGameTabsPlugin.java"
-            )
-        );
-
-        assertTrue(
-            "CGT mouse listener must run before RuneLite's generic overlay drag listener",
-            source.contains("mouseManager.registerMouseListener(0, mouseAdapter)")
-        );
-        assertTrue(
-            "owned Alt-drag press must be consumed",
-            source.contains("if (altDragGesture)\n                {\n                    suppressNextLeftClick = true;\n                    event.consume();")
-        );
-        assertTrue(
-            "owned Alt-drag must move every captured member, including the primary tab",
-            source.contains("for (Map.Entry<Integer, Point> entry : dragStartLocations.entrySet())")
-                && !source.contains("if (entry.getKey() == altDragTab)")
-        );
-    }
-
-    @Test
     public void stickTogetherAndSnapShareOneCgtDropPath() throws IOException
     {
         final String source = Files.readString(
@@ -91,6 +66,6 @@ public class FreeformPlacementContractTest
 
         assertTrue(source.contains("stickyGroups = StickyGroups.detect("));
         assertTrue(source.contains("final TabSnapManager.SnapResult snap = snapManager.findSnap("));
-        assertTrue(source.contains("overlay.setCustomSnapEnabled(false)"));
+        assertTrue(!source.contains("registerMouseListener(0,"));
     }
 }

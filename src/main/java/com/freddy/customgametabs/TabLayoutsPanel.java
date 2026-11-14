@@ -2,6 +2,8 @@ package com.freddy.customgametabs;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Component;
+import java.awt.Container;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Graphics2D;
@@ -72,11 +74,15 @@ final class TabLayoutsPanel extends PluginPanel
             return;
         }
 
+        final String focused = focusedControl(this);
         refreshing = true;
         final String statusText = status.getText();
         removeAll();
 
         addTitle("Activity Layouts", Color.WHITE);
+        addHelp(plugin.isLayoutAvailable()
+            ? "Alt-drag to move tabs. Right-click for native tab actions."
+            : "Tabs appear when logged in using Resizable Modern mode.");
         add(Box.createRigidArea(new Dimension(0, 7)));
         addPresets();
         addSpacerSeparator();
@@ -98,6 +104,7 @@ final class TabLayoutsPanel extends PluginPanel
         refreshing = false;
         revalidate();
         repaint();
+        restoreFocus(this, focused);
     }
 
     private void addPresets()
@@ -115,6 +122,8 @@ final class TabLayoutsPanel extends PluginPanel
             actions.setBackground(ColorScheme.DARK_GRAY_COLOR);
             final JButton load = new JButton("Load");
             final JButton save = new JButton("Save");
+            identify(load, "load-" + slot, "Load layout " + slot);
+            identify(save, "save-" + slot, "Save layout " + slot);
             load.setEnabled(plugin.hasActivityPreset(slot));
             load.setToolTipText("Load the complete activity layout");
             save.setToolTipText("Save the complete current activity layout");
@@ -144,7 +153,7 @@ final class TabLayoutsPanel extends PluginPanel
         add(labeledControl("Mode", mode));
 
         final JSpinner rows = new JSpinner(new SpinnerNumberModel(
-            plugin.getButtonsPerRow(),
+            Math.max(1, Math.min(LayoutSpec.TABS.length, plugin.getButtonsPerRow())),
             1,
             LayoutSpec.TABS.length,
             1
@@ -162,6 +171,7 @@ final class TabLayoutsPanel extends PluginPanel
     private void addTabControls()
     {
         addSectionTitle("Tabs");
+        addHelp("Main: always shown. Drawer: shown when open. Hidden: removed from this layout.");
         final List<Integer> order = plugin.getTabOrder();
 
         for (int position = 0; position < order.size(); position++)
@@ -170,14 +180,20 @@ final class TabLayoutsPanel extends PluginPanel
             final JPanel row = rowPanel();
             final JLabel label = new JLabel(LayoutSpec.TABS[tab].getName());
             label.setForeground(Color.WHITE);
-            row.add(label, BorderLayout.WEST);
+            label.setToolTipText(LayoutSpec.TABS[tab].getName());
+            label.setMinimumSize(new Dimension(0, 26));
+            row.add(label, BorderLayout.CENTER);
+            row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
+            row.setBorder(new EmptyBorder(1, 0, 1, 0));
 
-            final JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 2, 0));
+            final JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 1, 0));
             actions.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
             final JComboBox<TabState> state = new JComboBox<>(TabState.values());
             state.setSelectedItem(plugin.getTabState(tab));
-            state.setPreferredSize(new Dimension(78, 22));
+            identify(state, "state-" + tab, LayoutSpec.TABS[tab].getName() + " placement");
+            label.setLabelFor(state);
+            state.setPreferredSize(new Dimension(76, 26));
             state.addActionListener(e ->
             {
                 if (!refreshing)
@@ -190,6 +206,8 @@ final class TabLayoutsPanel extends PluginPanel
             final JButton down = new JButton("↓");
             compactButton(up);
             compactButton(down);
+            identify(up, "up-" + tab, "Move " + LayoutSpec.TABS[tab].getName() + " earlier");
+            identify(down, "down-" + tab, "Move " + LayoutSpec.TABS[tab].getName() + " later");
             up.setEnabled(position > 0);
             down.setEnabled(position < order.size() - 1);
             up.setToolTipText("Move earlier");
@@ -209,6 +227,10 @@ final class TabLayoutsPanel extends PluginPanel
     private void addDrawerControls()
     {
         addSectionTitle("Drawer");
+        if (!plugin.isDrawerEnabled())
+        {
+            addHelp("Drawer tabs are unavailable while the drawer is disabled.");
+        }
 
         final JCheckBox enabled = new JCheckBox();
         enabled.setSelected(plugin.isDrawerEnabled());
@@ -290,6 +312,63 @@ final class TabLayoutsPanel extends PluginPanel
         add(restore);
     }
 
+    private void addHelp(String text)
+    {
+        final JLabel help = new JLabel("<html><body style='width:145px'>" + text + "</body></html>");
+        help.setForeground(MUTED_TEXT);
+        help.setAlignmentX(LEFT_ALIGNMENT);
+        help.setBorder(new EmptyBorder(4, 0, 6, 0));
+        add(help);
+    }
+
+    private static void identify(Component component, String id, String description)
+    {
+        component.setName(id);
+        if (component.getAccessibleContext() != null)
+        {
+            component.getAccessibleContext().setAccessibleName(description);
+        }
+    }
+
+    private static String focusedControl(Component root)
+    {
+        Component focused = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
+        if (focused == null || !SwingUtilities.isDescendingFrom(focused, root))
+        {
+            return null;
+        }
+        // Editors can be nested several levels inside their named control.
+        while (focused != null && focused != root)
+        {
+            if (focused.getName() != null)
+            {
+                return focused.getName();
+            }
+            focused = focused.getParent();
+        }
+        return null;
+    }
+
+    private static void restoreFocus(Component component, String name)
+    {
+        if (name == null)
+        {
+            return;
+        }
+        if (name.equals(component.getName()) && component.isEnabled())
+        {
+            component.requestFocusInWindow();
+            return;
+        }
+        if (component instanceof Container)
+        {
+            for (Component child : ((Container) component).getComponents())
+            {
+                restoreFocus(child, name);
+            }
+        }
+    }
+
     static BufferedImage createNavigationIcon()
     {
         final BufferedImage image = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
@@ -359,6 +438,8 @@ final class TabLayoutsPanel extends PluginPanel
         final JPanel row = rowPanel();
         final JLabel label = new JLabel(labelText);
         label.setForeground(Color.WHITE);
+        label.setLabelFor(control);
+        identify(control, "control-" + labelText, labelText);
         row.add(label, BorderLayout.WEST);
         row.add(control, BorderLayout.EAST);
         row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
@@ -369,6 +450,7 @@ final class TabLayoutsPanel extends PluginPanel
     private static JButton wideButton(String text)
     {
         final JButton button = new JButton(text);
+        identify(button, text, text);
         button.setAlignmentX(LEFT_ALIGNMENT);
         button.setMaximumSize(new Dimension(Integer.MAX_VALUE, button.getPreferredSize().height));
         return button;
@@ -377,6 +459,6 @@ final class TabLayoutsPanel extends PluginPanel
     private static void compactButton(JButton button)
     {
         button.setMargin(new java.awt.Insets(1, 4, 1, 4));
-        button.setPreferredSize(new Dimension(24, 22));
+        button.setPreferredSize(new Dimension(28, 26));
     }
 }

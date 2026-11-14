@@ -8,7 +8,7 @@ import java.awt.Point;
 import java.awt.RenderingHints;
 import java.awt.geom.Rectangle2D;
 import java.awt.geom.RoundRectangle2D;
-import java.util.Arrays;
+
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,27 +30,23 @@ final class CustomGameTabsOverlay extends Overlay
     private final CustomGameTabsConfig config;
     private final TabIconRenderer iconRenderer;
     private final NativeTabController nativeTabController;
-    private final TabTooltipPresenter tooltipPresenter;
-    private final Rectangle2D.Double[] buttonBounds =
-        new Rectangle2D.Double[LayoutSpec.TABS.length];
+    private volatile TabHitRegions hitRegions = TabHitRegions.EMPTY;
+    private boolean renderedThisFrame;
 
     private volatile int hoveredTab = -1;
-    private volatile boolean rendered;
 
     @Inject
     CustomGameTabsOverlay(
         Client client,
         CustomGameTabsConfig config,
         TabIconRenderer iconRenderer,
-        NativeTabController nativeTabController,
-        TabTooltipPresenter tooltipPresenter
+        NativeTabController nativeTabController
     )
     {
         this.client = client;
         this.config = config;
         this.iconRenderer = iconRenderer;
         this.nativeTabController = nativeTabController;
-        this.tooltipPresenter = tooltipPresenter;
 
         setPosition(OverlayPosition.TOP_RIGHT);
         setLayer(OverlayLayer.MANUAL);
@@ -91,8 +87,7 @@ final class CustomGameTabsOverlay extends Overlay
             return null;
         }
 
-        rendered = false;
-        Arrays.fill(buttonBounds, null);
+        final Map<Integer, Rectangle2D> buttonBounds = new LinkedHashMap<>();
         applyQualityHints(graphics);
 
         final double buttonSize =
@@ -102,10 +97,8 @@ final class CustomGameTabsOverlay extends Overlay
             DockMetrics.framePaddingExact(config);
         final double radius =
             DockMetrics.cornerRadiusExact(config);
-        final int columns = Math.max(
-            1,
-            Math.min(config.buttonsPerRow(), order.size())
-        );
+        final Dimension canvas = client.getRealDimensions();
+        final int columns = DockMetrics.columns(config, order.size(), canvas.width, canvas.height);
         final int rows =
             (order.size() + columns - 1) / columns;
         final double railWidth =
@@ -143,12 +136,12 @@ final class CustomGameTabsOverlay extends Overlay
                     buttonSize
                 );
 
-            buttonBounds[tabIndex] = new Rectangle2D.Double(
+            buttonBounds.put(tabIndex, new Rectangle2D.Double(
                 getBounds().x + x,
                 getBounds().y + y,
                 buttonSize,
                 buttonSize
-            );
+            ));
 
             final boolean selected =
                 nativeTabController.isTabActive(tabIndex);
@@ -172,18 +165,11 @@ final class CustomGameTabsOverlay extends Overlay
             );
         }
 
-        if (
-            config.showTooltip()
-                && hoveredTab >= 0
-                && hoveredTab < LayoutSpec.TABS.length
-        )
-        {
-            tooltipPresenter.showIfAvailable(
-                nativeTabController.getTabName(hoveredTab)
-            );
-        }
-
-        rendered = true;
+        renderedThisFrame = true;
+        hitRegions = new TabHitRegions(
+            config.frameOpacity() > 0 ? new Rectangle2D.Double(
+                getBounds().x, getBounds().y, totalWidth, totalHeight) : null,
+            null, buttonBounds);
         return new Dimension(
             Math.max(1, (int) Math.ceil(totalWidth)),
             Math.max(1, (int) Math.ceil(totalHeight))
@@ -202,72 +188,17 @@ final class CustomGameTabsOverlay extends Overlay
 
     int tabAt(int x, int y)
     {
-        /*
-         * This is called by AWT mouse handlers. render() owns all RuneLite
-         * client/widget reads and publishes the current hit-test snapshot.
-         */
-        if (!rendered)
-        {
-            return -1;
-        }
-
-        for (int index = 0; index < buttonBounds.length; index++)
-        {
-            final Rectangle2D bounds = buttonBounds[index];
-
-            if (bounds != null && bounds.contains(x, y))
-            {
-                return index;
-            }
-        }
-
-        return -1;
+        return hitRegions.tabAt(x, y);
     }
 
     boolean containsInputSurface(int x, int y)
     {
-        if (!rendered)
-        {
-            return false;
-        }
-
-        if (config.frameOpacity() <= 0)
-        {
-            return tabAt(x, y) >= 0;
-        }
-
-        return getBounds().contains(x, y);
+        return hitRegions.contains(x, y);
     }
 
     Map<Integer, Point> captureButtonLocations()
     {
-        final Map<Integer, Point> result = new LinkedHashMap<>();
-
-        /*
-         * rendered is volatile and is written after buttonBounds, so a true
-         * read publishes the complete geometry snapshot to non-render threads.
-         */
-        if (!rendered)
-        {
-            return result;
-        }
-
-        for (int index = 0; index < buttonBounds.length; index++)
-        {
-            final Rectangle2D.Double bounds = buttonBounds[index];
-            if (bounds != null)
-            {
-                result.put(
-                    index,
-                    new Point(
-                        (int) Math.round(bounds.x),
-                        (int) Math.round(bounds.y)
-                    )
-                );
-            }
-        }
-
-        return result;
+        return hitRegions.locations();
     }
 
     Map<Integer, Point> projectButtonLocations()
@@ -282,10 +213,8 @@ final class CustomGameTabsOverlay extends Overlay
         final double buttonSize = DockMetrics.buttonSizeExact(config);
         final int gap = DockMetrics.gap(config);
         final double padding = DockMetrics.framePaddingExact(config);
-        final int columns = Math.max(
-            1,
-            Math.min(config.buttonsPerRow(), order.size())
-        );
+        final Dimension canvas = client.getRealDimensions();
+        final int columns = DockMetrics.columns(config, order.size(), canvas.width, canvas.height);
         final int projectedWidth = Math.max(
             1,
             (int) Math.ceil(
@@ -475,10 +404,34 @@ final class CustomGameTabsOverlay extends Overlay
         return Math.max(0, Math.min(100, percent));
     }
 
-    private void clearBounds()
+    boolean wasRenderedThisFrame()
     {
-        rendered = false;
-        Arrays.fill(buttonBounds, null);
+        return renderedThisFrame;
+    }
+
+    void beginFrame()
+    {
+        renderedThisFrame = false;
+    }
+
+    void completeFrame()
+    {
+        if (!renderedThisFrame)
+        {
+            invalidateHitRegions();
+        }
+    }
+
+    void invalidateHitRegions()
+    {
+        renderedThisFrame = false;
+        hitRegions = TabHitRegions.EMPTY;
+    }
+
+    void clearBounds()
+    {
+        renderedThisFrame = false;
+        hitRegions = TabHitRegions.EMPTY;
         hoveredTab = -1;
     }
 }

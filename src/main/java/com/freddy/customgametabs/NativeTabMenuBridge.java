@@ -76,6 +76,9 @@ final class NativeTabMenuBridge
         }
 
         buildNativeOperations(menu, stone);
+        // Third-party widget menus may be inserted above the actual native tab action.
+        // Keep them in the right-click menu, but leave the native op as the default.
+        prioritizeNativePrimaryAction(menu, stone.getId());
         ensureCancel(menu);
     }
 
@@ -125,6 +128,41 @@ final class NativeTabMenuBridge
              * complete native operation when the user selects it.
              */
             eventBus.post(new MenuEntryAdded(entry));
+        }
+    }
+
+    /**
+     * RuneLite-managed widget options are inserted at the top when MenuEntryAdded
+     * is replayed. That is appropriate for a right-click submenu, but would make
+     * a plugin's secondary option the default/Mouse Highlight label for this tab.
+     *
+     * Reorder the existing entries without creating new operations, deleting
+     * plugin actions, or changing callbacks or CC_OP identity.
+     */
+    static void prioritizeNativePrimaryAction(Menu menu, int widgetId)
+    {
+        final MenuEntry[] entries = menu.getMenuEntries();
+        if (entries == null || entries.length < 2)
+        {
+            return;
+        }
+
+        for (int i = 0; i < entries.length - 1; i++)
+        {
+            final MenuEntry entry = entries[i];
+            if (entry.getType() != MenuAction.CC_OP
+                || entry.getIdentifier() != 1
+                || entry.getParam0() != -1
+                || entry.getParam1() != widgetId)
+            {
+                continue;
+            }
+
+            final MenuEntry[] ordered = entries.clone();
+            System.arraycopy(ordered, i + 1, ordered, i, ordered.length - i - 1);
+            ordered[ordered.length - 1] = entry;
+            menu.setMenuEntries(ordered);
+            return;
         }
     }
 

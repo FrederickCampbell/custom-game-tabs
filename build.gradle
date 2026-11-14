@@ -17,12 +17,13 @@ def runeLiteVersion = 'latest.release'
 def pluginMainClass = 'com.freddy.customgametabs.CustomGameTabsPluginTest'
 
 group = 'com.freddy.customgametabs'
-version = '2.2.2'
+version = '2.3.0'
 
 dependencies {
     compileOnly group: 'net.runelite', name: 'client', version: runeLiteVersion
 
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.mockito:mockito-inline:4.11.0'
     testImplementation group: 'net.runelite', name: 'client', version: runeLiteVersion
     testImplementation group: 'net.runelite', name: 'jshell', version: runeLiteVersion
 }
@@ -64,4 +65,13 @@ tasks.register('shadowJar', Jar) {
     group = BasePlugin.BUILD_GROUP
     archiveClassifier.set('shadow')
     archiveFileName.set("${rootProject.name}-${project.version}-all.jar")
+}
+
+// Install the test-only agent at JVM startup; self-attachment is unavailable in
+// some CI containers. This is not part of the standard Plugin Hub artifact.
+tasks.named('test', Test) {
+    doFirst {
+        def agent = classpath.find { it.name.startsWith('byte-buddy-agent-') }
+        jvmArgs "-javaagent:${agent.absolutePath}"
+    }
 }

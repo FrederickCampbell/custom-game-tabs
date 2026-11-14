@@ -27,6 +27,21 @@ final class DockMetrics
         );
     }
 
+    static int columns(CustomGameTabsConfig config, int count, int canvasWidth, int canvasHeight)
+    {
+        if (count <= 0)
+        {
+            return 1;
+        }
+        final double size = buttonSizeExact(config);
+        final double padding = framePaddingExact(config) * 2;
+        final int gap = gap(config);
+        final int maxRows = Math.max(1, (int) Math.floor((canvasHeight - padding + gap) / (size + gap)));
+        final int maxColumns = Math.max(1, (int) Math.floor((canvasWidth - padding + gap) / (size + gap)));
+        final int preferred = Math.max(1, Math.min(config.buttonsPerRow(), count));
+        return Math.min(maxColumns, Math.max(preferred, (count + maxRows - 1) / maxRows));
+    }
+
     static int gap(CustomGameTabsConfig config)
     {
         return gapPixels(config.gap());

@@ -100,4 +100,19 @@ public class LayoutTest
         assertEquals(14, new LinkedHashSet<>(TabLayout.fullOrder(config)).size());
     }
 
+    @Test
+    public void dockWrapsToFitWithoutChangingTheConfiguredPreference()
+    {
+        CustomGameTabsConfig config = new CustomGameTabsConfig() {};
+        assertEquals(1, DockMetrics.columns(config, 14, 1000, 800));
+        assertEquals(2, DockMetrics.columns(config, 14, 765, 503));
+        assertEquals(1, config.buttonsPerRow());
+        CustomGameTabsConfig large = new CustomGameTabsConfig()
+        {
+            @Override public int buttonScale() { return 200; }
+            @Override public int gap() { return 20; }
+        };
+        assertEquals(4, DockMetrics.columns(large, 14, 765, 503));
+    }
+
 }

@@ -14,6 +14,8 @@ import java.util.Map;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import net.runelite.api.widgets.Widget;
+import net.runelite.api.Client;
+import net.runelite.api.SpritePixels;
 import net.runelite.client.game.SpriteManager;
 
 @Singleton
@@ -23,13 +25,24 @@ final class TabIconRenderer
         new Color(238, 216, 158);
 
     private final SpriteManager spriteManager;
+    private final Client client;
+    private final Map<Integer, SpritePixels> overrideSources = new HashMap<>();
+    private final Map<Integer, BufferedImage> overrideImages = new HashMap<>();
     private final Map<Integer, BufferedImage> trimmedSprites =
         new HashMap<>();
 
     @Inject
-    TabIconRenderer(SpriteManager spriteManager)
+    TabIconRenderer(SpriteManager spriteManager, Client client)
     {
         this.spriteManager = spriteManager;
+        this.client = client;
+    }
+
+    void clear()
+    {
+        trimmedSprites.clear();
+        overrideSources.clear();
+        overrideImages.clear();
     }
 
     void draw(
@@ -40,16 +53,7 @@ final class TabIconRenderer
         int opacity
     )
     {
-        BufferedImage image = null;
-
-        if (iconWidget != null && iconWidget.getSpriteId() >= 0)
-        {
-            final int spriteId = iconWidget.getSpriteId();
-            image = trimmedSprites.computeIfAbsent(
-                spriteId,
-                this::loadAndTrim
-            );
-        }
+        final BufferedImage image = imageFor(iconWidget);
 
         if (image == null)
         {
@@ -121,6 +125,33 @@ final class TabIconRenderer
         {
             quality.dispose();
         }
+    }
+
+    BufferedImage imageFor(Widget widget)
+    {
+        if (widget == null)
+        {
+            return null;
+        }
+        final int spriteId = widget.getSpriteId();
+        SpritePixels override = client.getWidgetSpriteOverrides().get(widget.getId());
+        if (override == null)
+        {
+            override = client.getSpriteOverrides().get(spriteId);
+        }
+        if (override != null)
+        {
+            if (overrideSources.get(widget.getId()) != override)
+            {
+                final BufferedImage image = override.toBufferedImage();
+                overrideSources.put(widget.getId(), override);
+                overrideImages.put(widget.getId(), image == null ? null : trimTransparent(image));
+            }
+            return overrideImages.get(widget.getId());
+        }
+        overrideSources.remove(widget.getId());
+        overrideImages.remove(widget.getId());
+        return spriteId < 0 ? null : trimmedSprites.computeIfAbsent(spriteId, this::loadAndTrim);
     }
 
     private BufferedImage loadAndTrim(int spriteId)

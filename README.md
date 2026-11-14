@@ -13,7 +13,7 @@ Custom Game Tabs replaces the visible Resizable Modern game-tab rail with config
 
 ## Activity layouts
 
-The **Tab Layouts** sidebar is the live editor for activity-specific layouts. Each of the three saved layouts stores the complete setup rather than positions alone:
+The **Tab Layouts** sidebar is the live editor for activity-specific layouts. Each of the three saved layouts stores geometry, behavior, and appearance:
 
 - Docked or Freeform mode and Buttons per row
 - Tab order
@@ -23,7 +23,7 @@ The **Tab Layouts** sidebar is the live editor for activity-specific layouts. Ea
 - **Stick Together** state and detected snapped groups
 - Button size/spacing, opacity, tab-name tooltip visibility, and button/border colors
 
-Loading a newly saved layout restores both its geometry/behavior and its saved visual appearance. Older v1/v2 presets remain readable; because they never recorded appearance, they keep the current appearance when loaded and gain appearance data the next time they are saved.
+The dock’s absolute screen position remains a global RuneLite overlay preference; it is not stored separately in each preset. Loading a newly saved layout restores its recorded geometry/behavior and visual appearance. Older v1/v2 presets remain readable; because they never recorded appearance, they keep the current appearance when loaded and gain appearance data the next time they are saved.
 
 ## Drawer
 
@@ -51,3 +51,7 @@ Resizable Modern (`TOPLEVEL_PRE_EOC`) only.
 ## Development
 
 The public plugin name is **Custom Game Tabs**. Java implementation classes live under `com.freddy.customgametabs`. The persisted config group remains `verticaltabsreplacement` intentionally so existing RuneLite profiles and enable-state behavior are not broken by the code refactor.
+
+## Verification and known limitations
+
+See the [engineering audit](docs/ENGINEERING_AUDIT.md) for findings, source comparisons and regression evidence, and the [manual test plan](docs/MANUAL_TEST_PLAN.md) for release acceptance. Stretched Mode uses RuneLite’s input translator; dock and drawer layouts adapt to the logical viewport without changing saved preferences. Avoid enabling another plugin’s tab-management feature at the same time. Extremely small viewports cannot contain arbitrarily large freeform groups.

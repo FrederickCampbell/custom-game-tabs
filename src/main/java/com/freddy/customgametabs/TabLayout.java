@@ -39,36 +39,27 @@ final class TabLayout
 
     static List<Integer> mainOrder(CustomGameTabsConfig config)
     {
-        final List<Integer> result = new ArrayList<>();
-        for (int tab : fullOrder(config))
-        {
-            if (state(config, tab) == TabState.MAIN)
-            {
-                result.add(tab);
-            }
-        }
-        return result;
+        return orderFor(config, TabState.MAIN);
     }
 
     static List<Integer> drawerOrder(CustomGameTabsConfig config)
     {
-        final List<Integer> result = new ArrayList<>();
-        for (int tab : fullOrder(config))
-        {
-            if (state(config, tab) == TabState.DRAWER)
-            {
-                result.add(tab);
-            }
-        }
-        return result;
+        return orderFor(config, TabState.DRAWER);
     }
 
     static List<Integer> includedOrder(CustomGameTabsConfig config)
     {
+        return orderFor(config, null);
+    }
+
+    private static List<Integer> orderFor(CustomGameTabsConfig config, TabState requested)
+    {
+        final Set<Integer> drawer = parse(config.drawerTabs());
         final List<Integer> result = new ArrayList<>();
         for (int tab : fullOrder(config))
         {
-            if (state(config, tab) != TabState.HIDDEN)
+            if (isShown(config, tab)
+                && (requested == null || drawer.contains(tab) == (requested == TabState.DRAWER)))
             {
                 result.add(tab);
             }
