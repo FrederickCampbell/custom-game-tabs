@@ -17,7 +17,7 @@ def runeLiteVersion = 'latest.release'
 def pluginMainClass = 'com.freddy.customgametabs.CustomGameTabsPluginTest'
 
 group = 'com.freddy.customgametabs'
-version = '2.2.2'
+version = '2.3.0'
 
 dependencies {
     compileOnly group: 'net.runelite', name: 'client', version: runeLiteVersion
