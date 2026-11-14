@@ -1,8 +1,11 @@
 package com.freddy.customgametabs;
 
+import net.runelite.api.Client;
+import net.runelite.api.GameState;
 import net.runelite.api.Menu;
 import net.runelite.api.MenuAction;
 import net.runelite.api.MenuEntry;
+import net.runelite.client.eventbus.EventBus;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -12,6 +15,22 @@ import static org.mockito.Mockito.*;
 public class NativeTabMenuBridgeTest
 {
     private static final int COMBAT_STONE = 0x123400;
+
+    @Test
+    public void nonOwnedInventorySurfaceNeverTouchesTheNativeMenu()
+    {
+        final Client client = mock(Client.class);
+        final EventBus eventBus = mock(EventBus.class);
+        final Menu nativeInventoryMenu = mock(Menu.class);
+        when(client.getGameState()).thenReturn(GameState.LOGGED_IN);
+        when(client.getMenu()).thenReturn(nativeInventoryMenu);
+
+        new NativeTabMenuBridge(client, eventBus)
+            .prepareMenu(LayoutSpec.INVENTORY_TAB, false);
+
+        verify(client, never()).getMenu();
+        verifyNoInteractions(nativeInventoryMenu, eventBus);
+    }
 
     @Test
     public void realTabActionRemainsDefaultWithoutRemovingManagedWidgetOptions()
