@@ -4,7 +4,6 @@ import com.google.inject.Provides;
 import java.awt.Dimension;
 import java.awt.Point;
 import java.awt.Rectangle;
-import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -30,7 +29,6 @@ import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.events.ProfileChanged;
-import net.runelite.client.input.MouseAdapter;
 import net.runelite.client.input.MouseManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -75,7 +73,6 @@ public class CustomGameTabsPlugin extends Plugin
     private volatile boolean inputAvailable;
     private volatile long inputGeneration;
     private volatile long lifecycleGeneration;
-    private boolean dragCaptured;
 
     private volatile TabLayoutsPanel layoutsPanel;
     private volatile NavigationButton layoutsNavigation;
@@ -85,9 +82,6 @@ public class CustomGameTabsPlugin extends Plugin
     private int restoreWorkingCountdown;
     private int lastCanvasWidth = -1;
     private int lastCanvasHeight = -1;
-
-    private boolean leftGestureCaptured;
-    private boolean suppressNextLeftClick;
 
     /* Alt-drag bookkeeping. CGT owns the entire Freeform gesture so RuneLite's
      * generic overlay mover cannot independently re-anchor one stone or leak the
@@ -103,106 +97,100 @@ public class CustomGameTabsPlugin extends Plugin
     /* AWT callbacks must not query Widget state. Publish client-thread bounds. */
     private volatile Rectangle[] sidePanelBounds = new Rectangle[0];
 
-    private final MouseAdapter mouseAdapter = new MouseAdapter()
-    {
-        @Override
-        public MouseEvent mouseMoved(MouseEvent event)
+    private final TabMouseInputListener mouseAdapter = new TabMouseInputListener(
+        new TabMouseInputListener.Target()
         {
-            if (!client.isMenuOpen())
+            @Override
+            public boolean isMenuOpen()
             {
-                updateHover(event.getX(), event.getY());
-            }
-            return event;
-        }
-
-        @Override
-        public MouseEvent mouseDragged(MouseEvent event)
-        {
-            if (client.isMenuOpen())
-            {
-                return event;
+                return client.isMenuOpen();
             }
 
-            if (leftGestureCaptured)
+            @Override
+            public boolean canStartAltDrag(int x, int y)
             {
-                event.consume();
-                return event;
+                return config.layoutMode() == TabLayoutMode.FREEFORM
+                    && CustomGameTabsPlugin.this.ownsInputSurface(x, y);
             }
 
-            if (dragCaptured)
+            @Override
+            public boolean ownsInputSurface(int x, int y)
             {
-                final int x = event.getX();
-                final int y = event.getY();
-                queueInput(() -> previewAltDrag(x, y));
-                event.consume();
-                return event;
+                return CustomGameTabsPlugin.this.ownsInputSurface(x, y);
             }
 
-            if (!event.isAltDown())
+            @Override
+            public boolean isDrawerHandle(int x, int y)
             {
-                updateHover(event.getX(), event.getY());
-            }
-            return event;
-        }
-
-        @Override
-        public MouseEvent mouseExited(MouseEvent event)
-        {
-            if (!client.isMenuOpen())
-            {
-                clearHover();
-            }
-            return event;
-        }
-
-        @Override
-        public MouseEvent mousePressed(MouseEvent event)
-        {
-            if (client.isMenuOpen())
-            {
-                resetClickGesture();
-                dragCaptured = false;
-                queueInput(CustomGameTabsPlugin.this::resetAltDrag);
-                return event;
+                return drawerOverlay.handleContains(x, y);
             }
 
-            if (event.isAltDown() && SwingUtilities.isLeftMouseButton(event))
+            @Override
+            public int tabAt(int x, int y)
             {
-                final int x = event.getX();
-                final int y = event.getY();
-                dragCaptured = config.layoutMode() == TabLayoutMode.FREEFORM && ownsInputSurface(x, y);
-                if (dragCaptured)
+                return CustomGameTabsPlugin.this.tabAt(x, y);
+            }
+
+            @Override
+            public boolean isDrawerTab(int tabIndex, int x, int y)
+            {
+                return drawerOverlay.tabAt(x, y) == tabIndex;
+            }
+
+            @Override
+            public void updateHover(int x, int y)
+            {
+                CustomGameTabsPlugin.this.updateHover(x, y);
+            }
+
+            @Override
+            public void clearHover()
+            {
+                CustomGameTabsPlugin.this.clearHover();
+            }
+
+            @Override
+            public void beginAltDrag(int x, int y)
+            {
+                queueInput(() -> CustomGameTabsPlugin.this.beginAltDrag(x, y));
+            }
+
+            @Override
+            public void previewAltDrag(int x, int y)
+            {
+                queueInput(() -> CustomGameTabsPlugin.this.previewAltDrag(x, y));
+            }
+
+            @Override
+            public void finishAltDrag(int endX, int endY)
+            {
+                queueInput(() ->
                 {
-                    queueInput(() -> beginAltDrag(x, y));
-                    suppressNextLeftClick = true;
-                    event.consume();
-                }
-                return event;
+                    if (altDragGesture)
+                    {
+                        CustomGameTabsPlugin.this.finishAltDrag(altDragDrawer, altDragTab,
+                            dragStartMouseX, dragStartMouseY, endX, endY,
+                            dragStartDrawerHandle, copyPoints(dragStartLocations));
+                        resetAltDrag();
+                    }
+                });
             }
 
-            dragCaptured = false;
-            queueInput(CustomGameTabsPlugin.this::resetAltDrag);
-            final int x = event.getX();
-            final int y = event.getY();
-            if (!ownsInputSurface(x, y) || !SwingUtilities.isLeftMouseButton(event))
+            @Override
+            public void cancelAltDrag()
             {
-                return event;
+                queueInput(CustomGameTabsPlugin.this::resetAltDrag);
             }
 
-            leftGestureCaptured = true;
-            suppressNextLeftClick = true;
-            event.consume();
-
-            if (drawerOverlay.handleContains(x, y))
+            @Override
+            public void toggleDrawer()
             {
                 queueInput(CustomGameTabsPlugin.this::toggleDrawer);
-                return event;
             }
 
-            final int tabIndex = tabAt(x, y);
-            if (tabIndex >= 0)
+            @Override
+            public void activateTab(int tabIndex, boolean fromDrawer)
             {
-                final boolean fromDrawer = drawerOverlay.tabAt(x, y) == tabIndex;
                 queueInput(() ->
                 {
                     nativeTabController.activateTab(tabIndex);
@@ -212,65 +200,7 @@ public class CustomGameTabsPlugin extends Plugin
                     }
                 });
             }
-            return event;
-        }
-
-        @Override
-        public MouseEvent mouseReleased(MouseEvent event)
-        {
-            if (dragCaptured)
-            {
-                if (!SwingUtilities.isLeftMouseButton(event))
-                {
-                    return event;
-                }
-                final int endX = event.getX();
-                final int endY = event.getY();
-                dragCaptured = false;
-                queueInput(() ->
-                {
-                    if (altDragGesture)
-                    {
-                        finishAltDrag(altDragDrawer, altDragTab, dragStartMouseX, dragStartMouseY,
-                            endX, endY, dragStartDrawerHandle, copyPoints(dragStartLocations));
-                        resetAltDrag();
-                    }
-                });
-                event.consume();
-                return event;
-            }
-
-            if (client.isMenuOpen())
-            {
-                leftGestureCaptured = false;
-                return event;
-            }
-
-            if (leftGestureCaptured && SwingUtilities.isLeftMouseButton(event))
-            {
-                leftGestureCaptured = false;
-                event.consume();
-            }
-            return event;
-        }
-
-        @Override
-        public MouseEvent mouseClicked(MouseEvent event)
-        {
-            if (client.isMenuOpen())
-            {
-                suppressNextLeftClick = false;
-                return event;
-            }
-
-            if (suppressNextLeftClick && SwingUtilities.isLeftMouseButton(event))
-            {
-                suppressNextLeftClick = false;
-                event.consume();
-            }
-            return event;
-        }
-    };
+        });
 
     @Override
     protected void startUp()
@@ -346,8 +276,7 @@ public class CustomGameTabsPlugin extends Plugin
         drawManager.unregisterEveryFrameListener(drawComplete);
         tooltipPresenter.setTextSupplier(() -> null);
         overlayManager.remove(tooltipPresenter);
-        resetClickGesture();
-        dragCaptured = false;
+        mouseAdapter.resetAll();
         sidePanelBounds = new Rectangle[0];
         removeLayoutsNavigation();
         clientThread.invoke(() ->
@@ -1204,12 +1133,6 @@ public class CustomGameTabsPlugin extends Plugin
         altDragTab = -1;
         dragStartDrawerHandle = null;
         dragStartLocations = new LinkedHashMap<>();
-    }
-
-    private void resetClickGesture()
-    {
-        leftGestureCaptured = false;
-        suppressNextLeftClick = false;
     }
 
     private CustomGameTabOverlay overlayForTab(int tabIndex)
